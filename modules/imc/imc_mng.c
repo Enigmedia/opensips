@@ -768,6 +768,12 @@ int imc_handle_groups_internal(struct sip_uri *src, str *body)
 		lock_release(&_imc_htable[i].lock);
 	}
 
+	if(result == NULL)
+	{
+		result = pkg_malloc(strlen(body_buf) + 1);
+		memcpy(result,body_buf,strlen(body_buf)+1);
+	}
+
 	body->s   = result;
 	body->len = strlen(result);
 
