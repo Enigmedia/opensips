@@ -687,7 +687,7 @@ int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 /**
  *
  */
-int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, str *body)
+int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, int body_buf_len, str *body)
 {
 	int i;
 	imc_member_p member = 0;
@@ -697,6 +697,9 @@ int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, str *body)
 		return -1;
 
 	p =body_buf;
+
+	snprintf(p, body_buf_len, "Rooms:\n");
+	p = p + strlen(p);
 
 	for(i=0; i<imc_hash_size; i++)
 	{
@@ -723,9 +726,10 @@ int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, str *body)
 					*p++ = '~';
 				}
 
-				strncpy(p, irp->name.s, irp->name.len);
-				p += irp->name.len;
-				*p++ = '\n';
+				snprintf(p, body_buf_len, "sip:%.*s@%.*s %.*s\n",irp->name.len,irp->name.s,irp->domain.len,irp->domain.s,irp->alias.len, irp->alias.s);
+				p = p + strlen(p);
+
+
 			}
 			irp = irp_temp;
 		}
