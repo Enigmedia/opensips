@@ -881,7 +881,8 @@ void destroy(void)
 	if(imc_db==NULL)
 		goto done;
 
-	if (imc_db_mode==DB_MODE_REALTIME || imc_db_mode==DB_MODE_SHUTDOWN ) {
+	if (imc_db_mode==DB_MODE_SHUTDOWN ) {
+		LM_DBG("saving to data base...\n");
 		save_db();
 	}
 	else
