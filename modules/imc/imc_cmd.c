@@ -37,7 +37,7 @@
 #include "imc.h"
 #include "imc_cmd.h"
 
-#define IMC_BUF_SIZE	1024
+#define IMC_BUF_SIZE	1024*3
 
 static char imc_body_buf[IMC_BUF_SIZE];
 
