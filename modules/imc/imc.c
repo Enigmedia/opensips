@@ -51,6 +51,7 @@
 
 #include "../tm/tm_load.h"
 
+#include "../dialog/dlg_db_handler.h"
 
 #include "imc_mng.h"
 #include "imc_cmd.h"
@@ -63,7 +64,7 @@ db_con_t *imc_db = NULL;
 db_func_t imc_dbf;
 static str db_url  = {NULL, 0};
 str outbound_proxy = {NULL, 0};
-int imc_db_mode;
+int imc_db_mode = DB_MODE_SHUTDOWN;
 
 str rooms_table   = str_init("imc_rooms");
 str members_table = str_init("imc_members");
@@ -89,10 +90,7 @@ static int imc_manager(struct sip_msg*, char *, char *);
 static struct mi_root* imc_mi_list_rooms(struct mi_root* cmd, void* param);
 static struct mi_root* imc_mi_list_members(struct mi_root* cmd, void* param);
 
-#define DB_MODE_NONE				0
-#define DB_MODE_REALTIME			1
-#define DB_MODE_DELAYED				2
-#define DB_MODE_SHUTDOWN			3
+
 
 void destroy(void);
 
@@ -363,6 +361,12 @@ static int mod_init(void)
 	{
 		LM_ERR("initializing hash table\n");
 		return -1;
+	}
+
+	if(imc_db_mode < DB_MODE_NONE || imc_db_mode > DB_MODE_SHUTDOWN)
+	{
+		LM_ERR("imc_db_mode not valid: %i, setting to %i\n", imc_db_mode, DB_MODE_SHUTDOWN);
+		imc_db_mode = DB_MODE_SHUTDOWN;
 	}
 
 	imc_cmd_start_str.len = strlen(imc_cmd_start_str.s);
