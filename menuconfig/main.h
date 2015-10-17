@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -40,7 +40,8 @@ extern char *prev_prefix;
 extern WINDOW *menu_window;
 
 #define MAKE_CONF_FILE	"Makefile.conf"
-#define DEFAULT_INSTALL_PREFIX	"/usr/"
+#define MAKE_TEMP_FILE	"Makefile.conf.template"
+#define DEFAULT_INSTALL_PREFIX	"/usr/local/"
 
 #define CONF_COMPILE_OPT	"Configure Compile Options"
 	#define CONF_EXCLUDED_MODS		"Configure Excluded Modules"

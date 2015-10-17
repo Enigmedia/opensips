@@ -2,7 +2,7 @@
  * $Id$
  *
  * Copyright (C) 2007 Voice Sistem SRL
- * 
+ *
  * This file is part of opensips, a free SIP server.
  *
  * opensips is free software; you can redistribute it and/or modify
@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -37,6 +37,7 @@
 #include "dprint.h"
 #include "timer.h"
 #include "pt.h"
+#include "bin_interface.h"
 
 
 /* array with children pids, 0= main proc,
@@ -76,6 +77,10 @@ int init_multi_proc_support(void)
 		/* attendent */
 		proc_no++;
 	}
+
+	/* info packet UDP receivers */
+	proc_no += bin ? bin_children : 0;
+
 	/* timer processes */
 	proc_no += count_timer_procs();
 
@@ -203,7 +208,7 @@ int count_init_children(int flags)
 	struct sr_module *m;
 	struct socket_info* si;
 
-	if (dont_fork) 
+	if (dont_fork)
 		goto skip_listeners;
 
 	/* UDP listening children */
@@ -231,12 +236,36 @@ skip_listeners:
 		for (i=0;m->exports->procs[i].name;i++) {
 			if (!m->exports->procs[i].no || !m->exports->procs[i].function)
 				continue;
-			
+
 			if (!flags || (m->exports->procs[i].flags & flags))
 				ret+=m->exports->procs[i].no;
 		}
 	}
 
 	LM_DBG("%d children are going to be inited\n",ret);
+	return ret;
+}
+
+/* returns the number of SIP listener processes (UDP + TCP + SCTP) */
+int count_sip_listeners(void)
+{
+	int ret = 0;
+	struct socket_info* si;
+
+	if (dont_fork)
+		return 1;
+
+	for (si = udp_listen; si; si = si->next)
+		ret += si->children;
+
+	#ifdef USE_TCP
+	ret += tcp_disable? 0 : tcp_children_no;
+	#endif
+
+	#ifdef USE_SCTP
+	for (si = sctp_listen; si; si = si->next)
+		ret += si->children;
+	#endif
+
 	return ret;
 }

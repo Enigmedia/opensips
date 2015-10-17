@@ -25,8 +25,18 @@
  */
 
 
-#ifndef _MI_HTTP_HTTPD_LOAD_H
-#define _MI_HTTP_HTTPD_LOAD_H
+#ifndef HTTPD_HTTPD_LOAD_H
+#define HTTPD_HTTPD_LOAD_H
+
+
+#define HTTPD_UNKNOWN_CONTENT_LEN	-1
+
+enum HTTPD_CONTENT_TYPE {
+	HTTPD_UNKNOWN_CNT_TYPE = -1,
+	HTTPD_STD_CNT_TYPE = 0,
+	HTTPD_TEXT_XML_CNT_TYPE,
+	HTTPD_APPLICATION_JSON_CNT_TYPE
+};
 
 /**
  * A client has requested the given url using the given method ("GET",
@@ -110,8 +120,10 @@ struct httpd_cb {
 
 
 
-const char *lookup_arg(void *connection, const char *key);
-typedef const char *(*lookup_arg_f)(void *connection, const char *key);
+void lookup_arg(void *connection, const char *key,
+			void *con_cls, str *val);
+typedef void (*lookup_arg_f)(void *connection, const char *key,
+			void *con_cls, str *val);
 
 int register_httpdcb(const char *mod, str *root_path,
 			httpd_acces_handler_cb f1,
@@ -128,6 +140,8 @@ typedef struct httpd_api {
 }httpd_api_t;
 
 
+void httpd_lookup_arg(void *connection, const char *key,
+			void *con_cls, str *val);
 
 typedef int(*load_httpd_f)(httpd_api_t *api);
 int httpd_bind(httpd_api_t *api);

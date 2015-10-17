@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -44,6 +44,7 @@
 #include <arpa/nameser_compat.h>
 #endif
 
+#include "mem/shm_mem.h"
 #include "ip_addr.h"
 #include "proxy.h"
 
@@ -152,6 +153,7 @@ void free_rdata_list(struct rdata* head);
 
 
 extern int dns_try_ipv6;
+extern int dns_try_naptr;
 
 
 #define HEX2I(c) \
@@ -165,6 +167,31 @@ extern int dns_try_ipv6;
 
 #define get_srv(_rdata) \
 	( ((struct srv_rdata*)(_rdata)->rdata) )
+
+
+int  check_ip_address(struct ip_addr* ip, str *name,
+		unsigned short port, unsigned short proto, int resolver);
+
+struct hostent* sip_resolvehost(str* name, unsigned short* port,
+		unsigned short *proto, int is_sips, struct dns_node **dn);
+
+inline struct hostent* resolvehost(char* name, int no_ip_test);
+
+inline struct hostent* rev_resolvehost(struct ip_addr *ip);
+
+/*! \brief free the DNS resolver state machine */
+void free_dns_res( struct proxy_l *p );
+
+/*! \brief make a perfect copy of a resolver state machine */
+struct dns_node *dns_res_copy(struct dns_node *s);
+
+/*! \brief taked the next destination from a resolver state machine */
+int get_next_su(struct proxy_l *p, union sockaddr_union* su, int add_to_bl);
+
+
+int resolv_init();
+
+int resolv_blacklist_init();
 
 
 
@@ -222,10 +249,10 @@ static inline struct ip_addr* str2ip(str* st)
 	if (i<3) goto error_dots;
 	ip.af=AF_INET;
 	ip.len=4;
-	
+
 	return &ip;
 error_dots:
-	LM_DBG("too %s dots in [%.*s]\n", (i>3)?"many":"few", 
+	LM_DBG("too %s dots in [%.*s]\n", (i>3)?"many":"few",
 			st->len, st->s);
 	return NULL;
  error_char:
@@ -252,7 +279,7 @@ static inline struct ip_addr* str2ip6(str* st)
 	unsigned short* addr;
 	unsigned char* limit;
 	unsigned char* s;
-	
+
 	/* init */
 	if ((st->len) && (st->s[0]=='[')){
 		/* skip over [ ] */
@@ -296,7 +323,7 @@ static inline struct ip_addr* str2ip6(str* st)
 	}
 	if (!double_colon){ /* not ending in ':' */
 		addr[i]=htons(addr[i]);
-		i++; 
+		i++;
 	}
 	/* if address contained '::' fix it */
 	if (addr==addr_end){
@@ -309,7 +336,7 @@ static inline struct ip_addr* str2ip6(str* st)
 /*
 	DBG("str2ip6: idx1=%d, rest=%d, no_colons=%d, hex=%x\n",
 			idx1, rest, no_colons, hex);
-	DBG("str2ip6: address %x:%x:%x:%x:%x:%x:%x:%x\n", 
+	DBG("str2ip6: address %x:%x:%x:%x:%x:%x:%x:%x\n",
 			addr_start[0], addr_start[1], addr_start[2],
 			addr_start[3], addr_start[4], addr_start[5],
 			addr_start[6], addr_start[7] );
@@ -330,35 +357,53 @@ error_colons:
 
 error_char:
 	/*
-	DBG("str2ip6: WARNING: unexpected char %c in  [%.*s]\n", *s, st->len,
+	DBG("str2ip6: WARNING: unexpected char %c in [%.*s]\n", *s, st->len,
 			st->s);*/
 	return 0;
 }
 
 
-int  check_ip_address(struct ip_addr* ip, str *name,
-		unsigned short port, unsigned short proto, int resolver);
+static inline struct proxy_l* shm_clone_proxy(struct proxy_l *sp,
+													unsigned int move_dn)
+{
+	struct proxy_l *dp;
 
-struct hostent* sip_resolvehost(str* name, unsigned short* port,
-		unsigned short *proto, int is_sips, struct dns_node **dn);
+	dp = (struct proxy_l*)shm_malloc(sizeof(struct proxy_l));
+	if (dp==NULL) {
+		LM_ERR("no more shm memory\n");
+		return 0;
+	}
+	memset( dp , 0 , sizeof(struct proxy_l));
 
-inline struct hostent* resolvehost(char* name, int no_ip_test);
+	dp->port = sp->port;
+	dp->proto = sp->proto;
+	dp->addr_idx = sp->addr_idx;
+	dp->flags = PROXY_SHM_FLAG;
 
-inline struct hostent* rev_resolvehost(struct ip_addr *ip); 
+	/* clone the hostent */
+	if (hostent_shm_cpy( &dp->host, &sp->host)!=0)
+		goto error0;
 
-/*! \brief free the DNS resolver state machine */
-void free_dns_res( struct proxy_l *p );
+	/* clone the dns resolver */
+	if (sp->dn) {
+		if (move_dn) {
+			dp->dn = sp->dn;
+			sp->dn = 0;
+		} else {
+			dp->dn = dns_res_copy(sp->dn);
+			if (dp->dn==NULL)
+				goto error1;
+		}
+	}
 
-/*! \brief make a perfect copy of a resolver state machine */
-struct dns_node *dns_res_copy(struct dns_node *s);
+	return dp;
+error1:
+	free_shm_hostent(&dp->host);
+error0:
+	shm_free(dp);
+	return 0;
+}
 
-/*! \brief taked the next destination from a resolver state machine */
-int get_next_su(struct proxy_l *p, union sockaddr_union* su, int add_to_bl);
-
-
-int resolv_init();
-
-int resolv_blacklist_init();
 
 
 #endif

@@ -44,6 +44,11 @@ static int child_init(int);
 static void destroy(void);
 
 /**
+ * module parameters
+ */
+static unsigned int heartbeat = 0;
+
+/**
  * exported functions
  */
 static evi_reply_sock* rmq_parse(str socket);
@@ -58,6 +63,13 @@ static proc_export_t procs[] = {
 	{"RabbitMQ sender",  0,  0, rmq_process, 1, 0},
 	{0,0,0,0,0,0}
 };
+
+/* module parameters */
+static param_export_t mod_params[] = {
+	{"heartbeat",					INT_PARAM, &heartbeat},
+	{0,0,0}
+};
+
 /**
  * module exports
  */
@@ -66,7 +78,7 @@ struct module_exports exports= {
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,			/* dlopen flags */
 	0,							/* exported functions */
-	0,							/* exported parameters */
+	mod_params,							/* exported parameters */
 	0,							/* exported statistics */
 	0,							/* exported MI functions */
 	0,							/* exported pseudo-variables */
@@ -79,7 +91,7 @@ struct module_exports exports= {
 
 
 /**
- * exported functions for core event interface 
+ * exported functions for core event interface
  */
 static evi_export_t trans_export_rmq = {
 	RMQ_STR,					/* transport module name */
@@ -96,7 +108,7 @@ static evi_export_t trans_export_rmq = {
  */
 static int mod_init(void)
 {
-	LM_NOTICE("initializing module ...\n");
+	LM_NOTICE("initializing module ......\n");
 
 	if (register_event_mod(&trans_export_rmq)) {
 		LM_ERR("cannot register transport functions for RabbitMQ\n");
@@ -106,6 +118,13 @@ static int mod_init(void)
 	if (rmq_create_pipe() < 0) {
 		LM_ERR("cannot create communication pipe\n");
 		return -1;
+	}
+
+	if ( heartbeat <= 0 || heartbeat > 65535) {
+		LM_WARN("heartbeat is disabled according to the modparam configuration\n");
+		heartbeat = 0;
+	} else {
+		LM_NOTICE("heartbeat is enabled for [%d] seconds\n", heartbeat);
 	}
 
 	return 0;
@@ -136,20 +155,20 @@ static int rmq_match(evi_reply_sock *sock1, evi_reply_sock *sock2)
 	p1 = (rmq_params_t *)sock1->params;
 	p2 = (rmq_params_t *)sock2->params;
 	if (!p1 || !p2 ||
-			!(p1->flags & RMQ_PARAM_EXCH) || !(p2->flags & RMQ_PARAM_EXCH) ||
+			!(p1->flags & RMQ_PARAM_RKEY) || !(p2->flags & RMQ_PARAM_RKEY) ||
 			!(p1->flags & RMQ_PARAM_USER) || !(p2->flags & RMQ_PARAM_USER))
 		return 0;
 
 	if (sock1->port == sock2->port &&
 			sock1->address.len == sock2->address.len &&
-			p1->exchange.len == p2->exchange.len &&
+			p1->routing_key.len == p2->routing_key.len &&
 			p1->user.len == p2->user.len &&
 			(p1->user.s == p2->user.s || /* trying the static values */
 			 !memcmp(p1->user.s, p2->user.s, p1->user.len)) &&
 			!memcmp(sock1->address.s, sock2->address.s, sock1->address.len) &&
-			!memcmp(p1->exchange.s, p2->exchange.s, p1->exchange.len)) {
+			!memcmp(p1->routing_key.s, p2->routing_key.s, p1->routing_key.len)) {
 		LM_DBG("socket matched: %s@%s:%hu/%s\n",
-				p1->user.s, sock1->address.s, sock2->port, p1->exchange.s);
+				p1->user.s, sock1->address.s, sock2->port, p1->routing_key.s);
 		return 1;
 	}
 	return 0;
@@ -157,8 +176,12 @@ static int rmq_match(evi_reply_sock *sock1, evi_reply_sock *sock2)
 
 static inline int dupl_string(str* dst, const char* begin, const char* end)
 {
+	str tmp;
 	if (dst->s)
 		shm_free(dst->s);
+
+	tmp.s = (char *)begin;
+	tmp.len = end - begin;
 
 	dst->s = shm_malloc(end - begin + 1);
 	if (!dst->s) {
@@ -166,16 +189,20 @@ static inline int dupl_string(str* dst, const char* begin, const char* end)
 		return -1;
 	}
 
-	memcpy(dst->s, begin, end - begin);
-	dst->s[end - begin] = 0;
-	dst->len = end - begin + 1;
+	if (un_escape(&tmp, dst) < 0)
+		return -1;
+
+	/* NULL-terminate the string */
+	dst->s[dst->len] = 0;
+	dst->len++;
+
 	return 0;
 }
 
 /*
  * This is the parsing function
  * The socket grammar should be:
- * 		 [user [':' password] '@'] ip [':' port] '/' exchange
+ * 		 [user [':' password] '@'] ip [':' port] '/' routing_key
  */
 static evi_reply_sock* rmq_parse(str socket)
 {
@@ -234,10 +261,10 @@ static evi_reply_sock* rmq_parse(str socket)
 				if (dupl_string(&sock->address, begin, socket.s + i) < 0)
 					goto err;
 				sock->flags |= EVI_ADDRESS;
-				if (dupl_string(&param->exchange, socket.s + i + 1, 
+				if (dupl_string(&param->routing_key, socket.s + i + 1,
 							socket.s + len) < 0)
 					goto err;
-				param->flags |= RMQ_PARAM_EXCH;
+				param->flags |= RMQ_PARAM_RKEY;
 				goto success;
 			}
 			break;
@@ -269,10 +296,10 @@ static evi_reply_sock* rmq_parse(str socket)
 					goto err;
 				}
 				sock->flags |= EVI_PORT;
-				if (dupl_string(&param->exchange, socket.s + i + 1, 
+				if (dupl_string(&param->routing_key, socket.s + i + 1,
 							socket.s + len) < 0)
 					goto err;
-				param->flags |= RMQ_PARAM_EXCH;
+				param->flags |= RMQ_PARAM_RKEY;
 				goto success;
 			}
 			break;
@@ -292,10 +319,10 @@ static evi_reply_sock* rmq_parse(str socket)
 					goto err;
 				sock->flags |= EVI_ADDRESS;
 
-				if (dupl_string(&param->exchange, socket.s + i + 1, 
+				if (dupl_string(&param->routing_key, socket.s + i + 1,
 							socket.s + len) < 0)
 					goto err;
-				param->flags |= RMQ_PARAM_EXCH;
+				param->flags |= RMQ_PARAM_RKEY;
 				goto success;
 			}
 			break;
@@ -311,16 +338,16 @@ static evi_reply_sock* rmq_parse(str socket)
 				}
 				sock->flags |= EVI_PORT;
 
-				if (dupl_string(&param->exchange, socket.s + i + 1, 
+				if (dupl_string(&param->routing_key, socket.s + i + 1,
 							socket.s + len) < 0)
 					goto err;
-				param->flags |= RMQ_PARAM_EXCH;
+				param->flags |= RMQ_PARAM_RKEY;
 				goto success;
 			}
 			break;
 		}
 	}
-	LM_WARN("not implemented %.*s\n", socket.len, socket.s); 
+	LM_WARN("not implemented %.*s\n", socket.len, socket.s);
 	goto err;
 
 success:
@@ -334,6 +361,7 @@ success:
 		param->flags |= RMQ_PARAM_USER|RMQ_PARAM_PASS;
 	}
 
+	param->heartbeat = heartbeat;
 	sock->params = param;
 	sock->flags |= EVI_PARAMS | RMQ_FLAG;
 
@@ -389,9 +417,9 @@ static str rmq_print(evi_reply_sock *sock)
 	if (sock->flags & EVI_ADDRESS)
 		DO_PRINT(sock->address.s, sock->address.len - 1);
 
-	if (param->flags & RMQ_PARAM_EXCH) {
+	if (param->flags & RMQ_PARAM_RKEY) {
 		DO_PRINT("/", 1);
-		DO_PRINT(param->exchange.s, param->exchange.len - 1);
+		DO_PRINT(param->routing_key.s, param->routing_key.len - 1);
 	}
 end:
 	return rmq_print_s;
@@ -424,7 +452,7 @@ static int rmq_build_params(str* ev_name, evi_params_p ev_params)
 	}
 
 	rmq_buffer_len = 0;
-	
+
 	/* first is event name - cannot be larger than the buffer size */
 	memcpy(rmq_buffer, ev_name->s, ev_name->len);
 	rmq_buffer_len = ev_name->len;
@@ -562,4 +590,5 @@ destroy:
 		shm_free(rmqs);
 	rmq_destroy(sock);
 }
+
 

@@ -1,18 +1,7 @@
 %define name    opensips
-%define ver     1.9.1
+%define ver     1.11.5
 %define rel     0
 %define _sharedir %{_prefix}/share
-
-%define EXCLUDED_MODULES	aaa_radius b2b_entities b2b_logic db_http json memcached jabber cpl-c xmpp rls mi_xmlrpc xcap_client db_mysql db_postgres db_unixodbc db_oracle db_berkeley osp perl snmpstats db_perlvdb peering carrierroute mmgeoip presence presence_xml presence_mwi presence_dialoginfo pua pua_bla pua_mi pua_usrloc pua_xmpp pua_dialoginfo xcap xcap_client ldap h350 identity regex
-%define MYSQL_MODULES		modules/db_mysql
-%define UNIXODBC_MODULES	modules/db_unixodbc
-%define POSTGRES_MODULES	modules/db_postgres
-%define XMPP_MODULES		modules/jabber modules/xmpp
-%define CPL_MODULES			modules/cpl-c
-%define SNMPSTATS_MODULES	modules/snmpstats
-%define PRESENCE_MODULES	modules/presence modules/presence_dialoginfo modules/presence_xml modules/presence_mwi modules/presence_xcapdiff modules/pua modules/pua_bla modules/pua_dialoginfo modules/pua_mi modules/pua_usrloc modules/pua_xmpp modules/rls modules/xcap modules/xcap_client
-%define RADIUS_MODULES		modules/aaa_radius modules/peering
-%define B2BUA_MODULES		modules/b2b_entities modules/b2b_logic
 
 Summary:      OpenSIPS, very fast and flexible SIP Server
 Name:         %name
@@ -21,14 +10,14 @@ Release:      %rel
 Packager:     Bogdan-Andrei Iancu <bogdan@opensips.org>
 License:      GPL
 Group:        System Environment/Daemons
-Source0:      http://opensips.org/pub/opensips/%{ver}/src/%{name}-%{ver}-tls_src.tar.gz
+Source0:      http://opensips.org/pub/opensips/%{ver}/src/%{name}-%{ver}_src.tar.gz
 Source1:      opensips.init
 Source2:      opensips.default
 URL:          http://opensips.org/
 Vendor:       opensips.org
 BuildRoot:    %{_tmppath}/%{name}-%{ver}-buildroot
 Conflicts:    opensips-mysql < %ver, opensips-xmpp < %ver, opensips-radius < %ver, opensips-cpl < %ver, opensips-unixodbc < %ver, opensips-presence < %ver, opensips-postgres < %ver, opensips-snmpstats < %ver
-BuildPrereq:  make flex bison pcre-devel
+BuildRequires:  make flex bison pcre-devel lua-devel libmemcache-devel OSPToolkit-devel mongo-c-driver-devel
 
 
 %description
@@ -48,7 +37,7 @@ interface.
 Summary:  MySQL connectivity for the OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  mysql-devel, zlib-devel
+BuildRequires:  mysql-devel, zlib-devel
 
 %description mysql
 The opensips-mysql package contains MySQL database connectivity that you
@@ -59,7 +48,7 @@ entries.
 Summary:  MPOSTGRES connectivity for the OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  postgresql-devel
+BuildRequires:  postgresql-devel
 
 %description postgres
 The opensips-postgres package contains Postgres database connectivity that you
@@ -70,7 +59,7 @@ entries.
 Summary:  UNIXODBC connectivity for OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  unixODBC-devel
+BuildRequires:  unixODBC-devel
 
 %description unixodbc
 The opensips-unixodbc package contains UNIXODBC database connectivity support
@@ -80,7 +69,7 @@ that is required by other modules with database dependencies.
 Summary:  sip 2 xmpp/jabber message translation support for the OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  expat-devel
+BuildRequires:  expat-devel
 
 %description xmpp
 The opensips-xmpp package contains a sip to xmpp/jabber message translator.
@@ -89,7 +78,7 @@ The opensips-xmpp package contains a sip to xmpp/jabber message translator.
 Summary:  CPL interpreter engine for the OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  libxml2-devel
+BuildRequires:  libxml2-devel
 
 %description cpl
 The opensips-cpl package contains a SIP CPL interpreter engine.
@@ -98,7 +87,7 @@ The opensips-cpl package contains a SIP CPL interpreter engine.
 Summary:  sip presence user agent support for the OpenSIPS.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  libxml2-devel, curl-devel
+BuildRequires:  libxml2-devel, curl-devel
 
 %description presence
 The opensips-pua package contains a sip Presence Agent.
@@ -107,7 +96,7 @@ The opensips-pua package contains a sip Presence Agent.
 Summary:  opensips radius support for AAA API.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  radiusclient-ng-devel
+BuildRequires:  radiusclient-ng-devel
 
 %description radius
 The opensips-radius package contains modules for radius authentication, group
@@ -117,7 +106,7 @@ The opensips-radius package contains modules for radius authentication, group
 Summary:  opensips b2bua implementation.
 Group:    System Environment/Daemons
 Requires: opensips = %ver
-BuildPrereq:  libxml2-devel
+BuildRequires:  libxml2-devel
 
 %description b2bua
 The opensips-b2bua package contains modules implement b2bua scenarios.
@@ -126,7 +115,7 @@ The opensips-b2bua package contains modules implement b2bua scenarios.
 Summary:  SNMP AgentX subagent module for OpenSIPS
 Group:    System Environment/Daemons
 Requires: opensips = %ver, net-snmp-utils
-BuildPrereq:  lm_sensors-devel net-snmp-devel
+BuildRequires:  lm_sensors-devel net-snmp-devel
 
 %description snmpstats
 OpenSIPS is a very fast and flexible SIP (RFC3261)
@@ -135,117 +124,271 @@ per second even on low-budget hardware.
 This package provides the snmpstats module for OpenSIPS. This module acts
 as an AgentX subagent which connects to a master agent.
 
+%package  ldap
+Summary:  opensips ldap implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  openldap-devel
+
+%description ldap
+The LDAP module implements an LDAP search interface for OpenSIPS.
+It exports script functions to perform an LDAP search operation and to store the search results as OpenSIPS AVPs.
+This allows for using LDAP directory data in the OpenSIPS SIP message routing script. 
+
+
+%package  identity
+Summary:  opensips identity implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  openssl-devel
+
+%description identity
+This module adds support for SIP Identity (see RFC 4474).
+
+
+%package  regex
+Summary:  opensips identity implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  pcre-devel
+
+%description regex
+This module offers matching operations against regular expressions using the powerful PCRE library. 
+
+
+%package  mmgeoip
+Summary:  opensips mmgeoip implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  GeoIP-devel
+
+%description mmgeoip
+This module is a lightweight wrapper for the MaxMind GeoIP API.
+It adds IP address-to-location lookup capability to OpenSIPS scripts.
+
+
+%package  json
+Summary:  opensips json implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  json-c-devel
+
+%description json
+This module introduces a new type of variable that provides both serialization and de-serialization from JSON format. 
+
+
+%package  carrierroute
+Summary:  opensips carrierroute implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  libconfuse-devel
+
+%description carrierroute
+A module which provides routing, balancing and blacklisting capabilities.
+
+
+%package  cachedb_memcached
+Summary:  opensips cachedb_memcached implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  libconfuse-devel libmemcached-devel
+
+%description cachedb_memcached
+This module is an implementation of a cache system designed to work with a memcached server.
+It uses libmemcached client library to connect to several memcached servers that store data.
+It registers the three functions for storing, fetching and removing a value to the core memcache management interface. 
+
+
+%package  cachedb_couchbase
+Summary:  opensips cachedb_couchbase implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  libcouchbase-devel
+
+%description cachedb_couchbase
+This module is an implementation of a cache system designed to work with a Couchbase server.
+It uses the libcouchbase client library to connect to the server instance,
+It uses the Key-Value interface exported from the core.  
+
+
+%package  event_rabbitmq
+Summary:  opensips event_rabbitmq implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  librabbitmq-devel
+
+%description event_rabbitmq
+This module provides the implementation of a RabbitMQ client for the Event Interface.
+It is used to send AMQP messages to a RabbitMQ server each time the Event Interface triggers an event subscribed for.  
+
+
+%package  cachedb_redis
+Summary:  opensips cachedb_redis implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  hiredis-devel
+
+%description cachedb_redis
+This module is an implementation of a cache system designed to work with a Redis server.
+It uses hiredis client library to connect to either a single Redis server instance,
+or to a Redis Server inside a Redis Cluster.
+It uses the Key-Value interface exported from the core.  
+
+
+%package  db_berkeley
+Summary:  opensips db_berkeley implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  db4-devel
+
+%description db_berkeley
+This is a module which integrates the Berkeley DB into OpenSIPS. It implements the DB API defined in OpenSIPS.  
+
+
+%package  db_oracle
+Summary:  opensips db_oracle implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  oracle-instantclient11.2-devel
+AutoReqProv: no
+
+%description db_oracle
+This is a module which provides Oracle connectivity for OpenSIPS.
+It implements the DB API defined in OpenSIPS.
+If you want to use the nathelper module,
+or any other modules that calls the get_all_ucontacts API export from usrloc,
+then you need to set the DORACLE_USRLOC define in the Makefile.defs file before compilation.  
+
+
+%package  mi_xmlrpc
+Summary:  opensips mi_xmlrpc implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  xmlrpc-c-devel
+
+%description mi_xmlrpc
+This module implements a xmlrpc server that handles xmlrpc requests and generates xmlrpc responses.
+When a xmlrpc message is received a default method is executed.  
+
+
+%package  mi_xmlrpc_ng
+Summary:  opensips mi_xmlrpc_ng implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  xmlrpc-c-devel
+
+%description mi_xmlrpc_ng
+This module implements a xmlrpc_ng server that handles xmlrpc_ng requests and generates xmlrpc_ng responses.
+When a xmlrpc_ng message is received a default method is executed.  
+
+
+%package  db_http
+Summary:  opensips db_http implementation.
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  libcurl-devel libmicrohttpd-devel
+
+%description db_http
+This module provides access to a database that is implemented as a HTTP server.
+It may be used in special cases where traversing firewalls is a problem,
+or where data encryption is required. 
+
+%package  cachedb_cassandra
+Summary:  Cassandra connector
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+BuildRequires:  thrift-cpp-devel
+
+%description  cachedb_cassandra
+Cassandra module is an implementation of a cache system designed to
+work with a cassandra server.
+
+%package  cachedb_mongodb
+Summary:  Mongodb connector
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+
+%description  cachedb_mongodb
+Mongodb module is an implementation of a cache system designed to
+work with a mongodb server.
+
+%package  osp
+Summary:  OSP Support for the OpenSIPS
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+
+%description  osp
+The OSP module enables OpenSIPS to support secure, multi-lateral peering using
+the OSP standard defined by ETSI (TS 101 321 V4.1.1).
+
+%package  perl
+Summary:  Helps implement your own OpenSIPS extensions in Perl
+Group:    System Environment/Daemons
+BuildRequires:  perl(ExtUtils::MakeMaker),perl(ExtUtils::Embed), perl-devel
+Requires: opensips = %ver
+Requires: perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+
+%description  perl
+The time needed when writing a new OpenSIPS module unfortunately is quite
+high, while the options provided by the configuration file are limited to
+the features implemented in the modules. With this Perl module, you can
+easily implement your own OpenSIPS extensions in Perl.  This allows for
+simple access to the full world of CPAN modules. SIP URI rewriting could be
+implemented based on regular expressions; accessing arbitrary data backends,
+e.g. LDAP or Berkeley DB files, is now extremely simple.
+
+%package  perlvdb
+Summary:  Perl virtual database engine
+Group:    System Environment/Daemons
+BuildRequires:  perl(ExtUtils::MakeMaker)
+Requires: opensips = %ver
+Requires: opensips-perl
+Requires: perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+
+%description  perlvdb
+The Perl Virtual Database (VDB) provides a virtualization framework for
+OpenSIPS's database access. It does not handle a particular database engine
+itself but lets the user relay database requests to arbitrary Perl functions.
+
+%package  sngtc
+Summary:  Sangoma media transcoding interface for the OpenSIPS
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+
+%description  sngtc
+The sngtc package implements interface to Sangoma media transcoding.
+
+
+%package  tlsops
+Summary:  TLS-relating functions for the OpenSIPS
+Group:    System Environment/Daemons
+Requires: opensips = %ver
+
+%description  tlsops
+The opensips-tlsops package implements TLS related functions to use in the
+routing script, and exports pseudo variables with certificate and TLS
+parameters.
+
+
 
 %prep
 %setup -n %{name}-%{ver}-tls
 
 %build
-make all skip_modules="%EXCLUDED_MODULES"         cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%MYSQL_MODULES"     cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%POSTGRES_MODULES"  cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%UNIXODBC_MODULES"  cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%XMPP_MODULES"      cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%CPL_MODULES"       cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%PRESENCE_MODULES"  cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%RADIUS_MODULES"    cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%B2BUA_MODULES"     cfg-target=/%{_sysconfdir}/opensips/
-make modules modules="%SNMPSTATS_MODULES" cfg-target=/%{_sysconfdir}/opensips/
+ARCH=$(uname -m)
+if [ "$ARCH" == "x86_64" ]; then
+	ORACLIENT=64
+else
+	ORACLIENT=
+fi
+	
+make all exclude_modules="" ORAVERSION=11.2/client$ORACLIENT cfg-target=%{_sysconfdir}/opensips/
 
 
 %install
 [ "$RPM_BUILD_ROOT" != "/" ] && rm -rf "$RPM_BUILD_ROOT"
 
-make install skip_modules="%EXCLUDED_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%MYSQL_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%MYSQL_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%POSTGRES_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%POSTGRES_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%UNIXODBC_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%UNIXODBC_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%XMPP_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%XMPP_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%CPL_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%CPL_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%PRESENCE_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%PRESENCE_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%RADIUS_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%RADIUS_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%B2BUA_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%B2BUA_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-modules modules="%SNMPSTATS_MODULES" \
-		basedir=$RPM_BUILD_ROOT \
-		prefix=/usr \
-		cfg-prefix=$RPM_BUILD_ROOT \
-		cfg-target=/%{_sysconfdir}/opensips/ 
-make install-doc modules="%SNMPSTATS_MODULES" \
+make install exclude_modules="" \
 		basedir=$RPM_BUILD_ROOT \
 		prefix=/usr \
 		cfg-prefix=$RPM_BUILD_ROOT \
@@ -289,31 +432,39 @@ fi
 %doc %{_docdir}/opensips/README.auth_diameter
 %doc %{_docdir}/opensips/README.avpops
 %doc %{_docdir}/opensips/README.benchmark
+%doc %{_docdir}/opensips/README.cachedb_local
+%doc %{_docdir}/opensips/README.cachedb_sql
 %doc %{_docdir}/opensips/README.call_control
 %doc %{_docdir}/opensips/README.cfgutils
 %doc %{_docdir}/opensips/README.closeddial
 %doc %{_docdir}/opensips/README.db_flatstore
+%doc %{_docdir}/opensips/README.db_cachedb
 %doc %{_docdir}/opensips/README.db_text
 %doc %{_docdir}/opensips/README.db_virtual
 %doc %{_docdir}/opensips/README.dialog
 %doc %{_docdir}/opensips/README.dispatcher
 %doc %{_docdir}/opensips/README.diversion
+%doc %{_docdir}/opensips/README.dns_cache
 %doc %{_docdir}/opensips/README.domain
 %doc %{_docdir}/opensips/README.domainpolicy
 %doc %{_docdir}/opensips/README.drouting
 %doc %{_docdir}/opensips/README.enum
 %doc %{_docdir}/opensips/README.event_datagram
+%doc %{_docdir}/opensips/README.event_route
+%doc %{_docdir}/opensips/README.event_xmlrpc
 %doc %{_docdir}/opensips/README.exec
 %doc %{_docdir}/opensips/README.gflags
 %doc %{_docdir}/opensips/README.group
 %doc %{_docdir}/opensips/README.imc
 %doc %{_docdir}/opensips/README.load_balancer
-%doc %{_docdir}/opensips/README.localcache
+%doc %{_docdir}/opensips/README.lua
 %doc %{_docdir}/opensips/README.mangler
+%doc %{_docdir}/opensips/README.mathops
 %doc %{_docdir}/opensips/README.maxfwd
 %doc %{_docdir}/opensips/README.mediaproxy
 %doc %{_docdir}/opensips/README.mi_datagram
 %doc %{_docdir}/opensips/README.mi_fifo
+%doc %{_docdir}/opensips/README.mi_http
 %doc %{_docdir}/opensips/README.msilo
 %doc %{_docdir}/opensips/README.nat_traversal
 %doc %{_docdir}/opensips/README.nathelper
@@ -325,10 +476,14 @@ fi
 %doc %{_docdir}/opensips/README.qos
 %doc %{_docdir}/opensips/README.ratelimit
 %doc %{_docdir}/opensips/README.registrar
+%doc %{_docdir}/opensips/README.rest_client
 %doc %{_docdir}/opensips/README.rr
 %doc %{_docdir}/opensips/README.rtpproxy
 %doc %{_docdir}/opensips/README.seas
+%doc %{_docdir}/opensips/README.script_helper
 %doc %{_docdir}/opensips/README.signaling
+%doc %{_docdir}/opensips/README.sipcapture
+%doc %{_docdir}/opensips/README.sipmsgops
 %doc %{_docdir}/opensips/README.siptrace
 %doc %{_docdir}/opensips/README.sl
 %doc %{_docdir}/opensips/README.sms
@@ -362,31 +517,39 @@ fi
 %{_libdir}/opensips/modules/auth_diameter.so
 %{_libdir}/opensips/modules/avpops.so
 %{_libdir}/opensips/modules/benchmark.so
+%{_libdir}/opensips/modules/cachedb_local.so
+%{_libdir}/opensips/modules/cachedb_sql.so
 %{_libdir}/opensips/modules/call_control.so
 %{_libdir}/opensips/modules/cfgutils.so
 %{_libdir}/opensips/modules/closeddial.so
+%{_libdir}/opensips/modules/db_cachedb.so
 %{_libdir}/opensips/modules/db_flatstore.so
 %{_libdir}/opensips/modules/db_text.so
 %{_libdir}/opensips/modules/db_virtual.so
 %{_libdir}/opensips/modules/dialog.so
 %{_libdir}/opensips/modules/dispatcher.so
 %{_libdir}/opensips/modules/diversion.so
+%{_libdir}/opensips/modules/dns_cache.so
 %{_libdir}/opensips/modules/domain.so
 %{_libdir}/opensips/modules/domainpolicy.so
 %{_libdir}/opensips/modules/drouting.so
 %{_libdir}/opensips/modules/enum.so
 %{_libdir}/opensips/modules/event_datagram.so
+%{_libdir}/opensips/modules/event_route.so
+%{_libdir}/opensips/modules/event_xmlrpc.so
 %{_libdir}/opensips/modules/exec.so
 %{_libdir}/opensips/modules/gflags.so
 %{_libdir}/opensips/modules/group.so
 %{_libdir}/opensips/modules/imc.so
 %{_libdir}/opensips/modules/load_balancer.so
-%{_libdir}/opensips/modules/localcache.so
+%{_libdir}/opensips/modules/lua.so
 %{_libdir}/opensips/modules/mangler.so
+%{_libdir}/opensips/modules/mathops.so
 %{_libdir}/opensips/modules/maxfwd.so
 %{_libdir}/opensips/modules/mediaproxy.so
 %{_libdir}/opensips/modules/mi_datagram.so
 %{_libdir}/opensips/modules/mi_fifo.so
+%{_libdir}/opensips/modules/mi_http.so
 %{_libdir}/opensips/modules/msilo.so
 %{_libdir}/opensips/modules/nat_traversal.so
 %{_libdir}/opensips/modules/nathelper.so
@@ -395,13 +558,18 @@ fi
 %{_libdir}/opensips/modules/pdt.so
 %{_libdir}/opensips/modules/permissions.so
 %{_libdir}/opensips/modules/pike.so
+%{_libdir}/opensips/modules/python.so
 %{_libdir}/opensips/modules/qos.so
 %{_libdir}/opensips/modules/ratelimit.so
 %{_libdir}/opensips/modules/registrar.so
+%{_libdir}/opensips/modules/rest_client.so
 %{_libdir}/opensips/modules/rr.so
 %{_libdir}/opensips/modules/rtpproxy.so
 %{_libdir}/opensips/modules/seas.so
+%{_libdir}/opensips/modules/script_helper.so
 %{_libdir}/opensips/modules/signaling.so
+%{_libdir}/opensips/modules/sipcapture.so
+%{_libdir}/opensips/modules/sipmsgops.so
 %{_libdir}/opensips/modules/siptrace.so
 %{_libdir}/opensips/modules/sl.so
 %{_libdir}/opensips/modules/sms.so
@@ -421,10 +589,13 @@ fi
 
 %{_sbindir}/opensips
 %{_sbindir}/osipsconsole
+%{_sbindir}/osipsconfig
 %{_sbindir}/opensipsctl
 %{_sbindir}/opensipsdbctl
 %{_sbindir}/opensipsunix
 %{_libdir}/opensips/opensipsctl/dbtextdb/dbtextdb.py
+%{_libdir}/opensips/opensipsctl/dbtextdb/dbtextdb.pyc
+%{_libdir}/opensips/opensipsctl/dbtextdb/dbtextdb.pyo
 %{_libdir}/opensips/opensipsctl/opensipsctl.base
 %{_libdir}/opensips/opensipsctl/opensipsctl.ctlbase
 %{_libdir}/opensips/opensipsctl/opensipsctl.dbtext
@@ -438,6 +609,7 @@ fi
 %{_mandir}/man8/*
 
 %{_sharedir}/opensips/dbtext/opensips/*
+%{_sharedir}/opensips/menuconfig_templates/
 
 %files mysql
 %defattr(-,root,root)
@@ -494,6 +666,7 @@ fi
 %doc %{_docdir}/opensips/README.pua_usrloc
 %doc %{_docdir}/opensips/README.pua_xmpp
 %doc %{_docdir}/opensips/README.rls
+%doc %{_docdir}/opensips/README.xcap
 %doc %{_docdir}/opensips/README.xcap_client
 
 %{_libdir}/opensips/modules/presence.so
@@ -509,6 +682,7 @@ fi
 %{_libdir}/opensips/modules/pua_usrloc.so
 %{_libdir}/opensips/modules/pua_xmpp.so
 %{_libdir}/opensips/modules/rls.so
+%{_libdir}/opensips/modules/xcap.so
 %{_libdir}/opensips/modules/xcap_client.so
 
 
@@ -537,12 +711,235 @@ fi
 %defattr(-,root,root)
 %doc %{_docdir}/opensips/README.b2b_entities
 %doc %{_docdir}/opensips/README.b2b_logic
+%doc %{_docdir}/opensips/README.b2b_sca
+%doc %{_docdir}/opensips/README.call_center
 
 %{_libdir}/opensips/modules/b2b_entities.so
 %{_libdir}/opensips/modules/b2b_logic.so
+%{_libdir}/opensips/modules/b2b_sca.so
+%{_libdir}/opensips/modules/call_center.so
+
+
+%files ldap
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.ldap
+%doc %{_docdir}/opensips/README.h350
+
+%{_libdir}/opensips/modules/ldap.so
+%{_libdir}/opensips/modules/h350.so
+
+
+%files identity
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.identity
+
+%{_libdir}/opensips/modules/identity.so
+
+
+%files regex
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.regex
+%doc %{_docdir}/opensips/README.dialplan
+
+%{_libdir}/opensips/modules/regex.so
+%{_libdir}/opensips/modules/dialplan.so
+
+
+%files mmgeoip
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.mmgeoip
+
+%{_libdir}/opensips/modules/mmgeoip.so
+
+
+%files json
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.json
+%doc %{_docdir}/opensips/README.mi_json
+
+%{_libdir}/opensips/modules/json.so
+%{_libdir}/opensips/modules/mi_json.so
+
+
+%files carrierroute
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.carrierroute
+
+%{_libdir}/opensips/modules/carrierroute.so
+
+
+%files cachedb_memcached
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.cachedb_memcached
+
+%{_libdir}/opensips/modules/cachedb_memcached.so
+
+
+%files event_rabbitmq
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.event_rabbitmq
+
+%{_libdir}/opensips/modules/event_rabbitmq.so
+
+
+%files cachedb_couchbase
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.cachedb_couchbase
+
+%{_libdir}/opensips/modules/cachedb_couchbase.so
+
+
+%files cachedb_redis
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.cachedb_redis
+
+%{_libdir}/opensips/modules/cachedb_redis.so
+
+
+%files db_berkeley
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.db_berkeley
+
+%{_sbindir}/bdb_recover
+%{_libdir}/opensips/modules/db_berkeley.so
+%{_libdir}/opensips/opensipsctl/opensipsctl.db_berkeley
+%{_libdir}/opensips/opensipsctl/opensipsdbctl.db_berkeley
+%{_sharedir}/opensips/db_berkeley/*
+
+
+%files db_oracle
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.db_oracle
+
+%{_sbindir}/opensips_orasel
+%{_libdir}/opensips/modules/db_oracle.so
+%{_libdir}/opensips/opensipsctl/opensipsctl.oracle
+%{_libdir}/opensips/opensipsctl/opensipsdbctl.oracle
+%{_libdir}/opensips/opensipsctl/opensipsdbfunc.oracle
+%{_sharedir}/opensips/oracle/*
+
+%files mi_xmlrpc
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.mi_xmlrpc
+
+%{_libdir}/opensips/modules/mi_xmlrpc.so
+
+
+%files mi_xmlrpc_ng
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.mi_xmlrpc_ng
+
+%{_libdir}/opensips/modules/mi_xmlrpc_ng.so
+
+
+%files db_http
+%defattr(-,root,root)
+%doc %{_docdir}/opensips/README.db_http
+%doc %{_docdir}/opensips/README.httpd
+%doc %{_docdir}/opensips/README.pi_http
+
+%{_libdir}/opensips/modules/db_http.so
+%{_libdir}/opensips/modules/httpd.so
+%{_libdir}/opensips/modules/pi_http.so
+%{_sharedir}/opensips/pi_http/*
+
+%files cachedb_cassandra
+%defattr(-,root,root,-)
+%doc %{_docdir}/opensips/README.cachedb_cassandra
+
+%{_libdir}/opensips/modules/cachedb_cassandra.so
+
+%files cachedb_mongodb
+%defattr(-,root,root,-)
+%doc %{_docdir}/opensips/README.cachedb_mongodb
+
+%{_libdir}/opensips/modules/cachedb_mongodb.so
+
+%files osp
+%defattr(-,root,root,-)
+%doc %{_docdir}/opensips/README.osp
+
+%{_libdir}/opensips/modules/osp.so
+
+%files perl
+%defattr(-,root,root,-)
+%dir %{_libdir}/opensips/perl/OpenSIPS
+%dir %{_libdir}/opensips/perl/OpenSIPS/LDAPUtils
+%dir %{_libdir}/opensips/perl/OpenSIPS/Utils
+%doc %{_docdir}/opensips/README.perl
+
+%{_libdir}/opensips/modules/perl.so
+%{_libdir}/opensips/perl/OpenSIPS.pm
+%{_libdir}/opensips/perl/OpenSIPS/Constants.pm
+%{_libdir}/opensips/perl/OpenSIPS/LDAPUtils/LDAPConf.pm
+%{_libdir}/opensips/perl/OpenSIPS/LDAPUtils/LDAPConnection.pm
+%{_libdir}/opensips/perl/OpenSIPS/Message.pm
+%{_libdir}/opensips/perl/OpenSIPS/Utils/PhoneNumbers.pm
+%{_libdir}/opensips/perl/OpenSIPS/Utils/Debug.pm
+
+%files perlvdb
+%defattr(-,root,root,-)
+%dir %{_libdir}/opensips/perl/OpenSIPS/VDB
+%dir %{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter
+%doc %{_docdir}/opensips/README.db_perlvdb
+
+%{_libdir}/opensips/modules/db_perlvdb.so
+%{_libdir}/opensips/perl/OpenSIPS/VDB.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/AccountingSIPtrace.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/Alias.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/Auth.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/Describe.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/Speeddial.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Adapter/TableVersions.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Column.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Pair.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/ReqCond.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Result.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/VTab.pm
+%{_libdir}/opensips/perl/OpenSIPS/VDB/Value.pm
+
+%files sngtc
+%defattr(-,root,root,-)
+%doc %{_docdir}/opensips/README.sngtc
+
+%{_libdir}/opensips/modules/sngtc.so
+
+
+%files tlsops
+%defattr(-,root,root,-)
+%doc %{_docdir}/opensips/README.tlsops
+
+%{_libdir}/opensips/modules/tlsops.so
 
 
 %changelog
+* Sun Apr 13 2014 Fabrizio Picconi <fabrizio.picconi@tiscali.it>
+- Fix x64_86 compilation problems
+
+* Tue Mar 22 2014 Fabrizio Picconi <fabrizio.picconi@tiscali.it>
+- Some new rpm optional modules are added:
+  b2b_sca,call_center,mi_json,script_helper
+
+* Tue Aug 06 2013 Fabrizio Picconi <fabrizio.picconi@tiscali.it>
+- Some new rpm optional modules are added:
+  mi_xmlrpc_ng,sngtc,db_cachedb,mathops,rest_client
+
+* Sun Jul 21 2013 Fabrizio Picconi <fabrizio.picconi@tiscali.it>
+- Some new rpm optional modules are added:
+  cachedb_cassandra,cachedb_mongodb,osp,perl,perlvdb,tlsops
+
+* Sun Jun 02 2013 Fabrizio Picconi <fabrizio.picconi@tiscali.it>
+- CentOS 6 support
+  Remove rpmbuild warning on BuildPrereq now deprecated for BuildRequires
+- opensips 1.9.1 support
+  Updated list of excluded modules
+  Updated list of file in rpm of core and modules
+- Some new rpm optional modules are added:
+  db_http pi_http json cachedb_couchbase cachedb_memcached
+  cachedb_redis event_rabbitmq db_berkeley perl db_perlvdb
+  carrierroute mmgeoip ldap h350 identity regex dialplan
+  Xlog mi_xmlrpc db_oracle
+
 * Mon Oct 18 2010 Marc Leurent <marc.leurent@vtx-telecom.ch>
 - Add missing dependencies pcre-devel for compilation
 - Xlog Module has been merged into core.

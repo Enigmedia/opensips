@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -48,7 +48,7 @@
 #define WRITE_BACK    2
 #define DB_ONLY       3
 
-#define UL_TABLE_VERSION 1007
+#define UL_TABLE_VERSION 1009
 
 extern str user_col;
 extern str domain_col;
@@ -64,6 +64,7 @@ extern str received_col;
 extern str path_col;
 extern str sock_col;
 extern str methods_col;
+extern str attr_col;
 extern str last_mod_col;
 extern str sip_instance_col;
 
@@ -78,7 +79,6 @@ extern int ul_hash_size;
 extern db_con_t* ul_dbh;   /* Database connection handle */
 extern db_func_t ul_dbf;
 
-
 /*
  * Matching algorithms
  */
@@ -87,5 +87,10 @@ extern db_func_t ul_dbf;
 
 extern int matching_mode;
 
+
+/*! \brief
+ * Initialize event structures
+ */
+int ul_event_init(void);
 
 #endif /* UL_MOD_H */

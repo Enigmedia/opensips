@@ -23,8 +23,11 @@ if [ -f ~/.opensipsctlrc ]; then
 fi
 
 if [ $TEST = "true" ]; then
+	ETCDIR=etc/
 	if [ -f ./opensipsctlrc ]; then
 		. ./opensipsctlrc
+	elif [ -f scripts/opensipsctlrc ]; then
+		. scripts/opensipsctlrc
 	fi
 fi
 
@@ -44,6 +47,9 @@ fi
 # you better set the variables in ~/.opensipsctlrc
 if [ -z $ETCDIR ] ; then
 	ETCDIR="/usr/local/etc/opensips"
+else
+	# Fix relative paths
+	[ "${ETCDIR:0:1}" != "/" ] && ETCDIR=$PWD/$ETCDIR
 fi
 
 ### version for this script
@@ -632,7 +638,7 @@ avpops() {
 		minfo "see '$0 avp help'"
 		exit 1
 	fi
-	if [ $1 = "avp" ] ; then
+	if [ "$1" = "avp" ] ; then
 		shift
 	else
 		merr "avp - unknown command $1"
@@ -1289,25 +1295,27 @@ dispatcher() {
 			;;
 		addgw)
 			shift
-			if [ $# -lt 3 ] ; then
+			if [ $# -lt 6 ] ; then
 				merr "too few parameters"
 				usage_dispatcher
 				exit 1
 			fi
 
-			if [ $# -gt 3 ] ; then
-				DISPATCHER_DESCRIPTION=$4
+			if [ $# -gt 6 ] ; then
+				DISPATCHER_DESCRIPTION=$7
 			else
 				DISPATCHER_DESCRIPTION=""
 			fi 
 
 			DISPATCHER_SETID=$1
 			DISPATCHER_DESTINATION=$2
-			DISPATCHER_FLAGS=$3
+			DISPATCHER_SOCKET=$3
+			DISPATCHER_STATE=$4
+			DISPATCHER_WEIGHT=$5
+			DISPATCHER_ATTRS=$6
 
-			QUERY="insert into $DISPATCHER_TABLE \
-				( $DISPATCHER_SETID_COLUMN, $DISPATCHER_DESTINATION_COLUMN, $DISPATCHER_FLAGS_COLUMN, $DISPATCHER_DESCRIPTION_COLUMN ) \
-				VALUES ($DISPATCHER_SETID,'$DISPATCHER_DESTINATION',$DISPATCHER_FLAGS,'$DISPATCHER_DESCRIPTION');"
+			QUERY="insert into $DISPATCHER_TABLE ($DISPATCHER_SETID_COLUMN, $DISPATCHER_DESTINATION_COLUMN, $DISPATCHER_SOCKET_COLUMN, $DISPATCHER_STATE_COLUMN, $DISPATCHER_WEIGHT_COLUMN, $DISPATCHER_ATTRS_COLUMN, $DISPATCHER_DESCRIPTION_COLUMN) VALUES ($DISPATCHER_SETID, '$DISPATCHER_DESTINATION', '$DISPATCHER_SOCKET', $DISPATCHER_STATE, $DISPATCHER_WEIGHT, '$DISPATCHER_ATTRS', '$DISPATCHER_DESCRIPTION');"
+
 			$DBCMD "$QUERY"
 
 			if [ $? -ne 0 ] ; then
@@ -1400,7 +1408,7 @@ dr() {
 				exit 1
 			fi
 
-			$CTLCMD ds_reload
+			$CTLCMD dr_reload
 			;;
 		rmgw)
 			shift
@@ -1450,7 +1458,7 @@ dr() {
 				exit 1
 			fi
 
-			$CTLCMD ds_reload
+			$CTLCMD dr_reload
 			;;
 		rmcr)
 			shift
@@ -1498,7 +1506,7 @@ dr() {
 				exit 1
 			fi
 
-			$CTLCMD ds_reload
+			$CTLCMD dr_reload
 			;;
 		rmgrp)
 			shift
@@ -1550,7 +1558,7 @@ dr() {
 				exit 1
 			fi
 
-			$CTLCMD ds_reload
+			$CTLCMD dr_reload
 			;;
 		rmgrule)
 			shift
@@ -2352,19 +2360,19 @@ usrloc() {
 
 	require_ctlengine
 
-	if [ $1 = "alias" ] ; then
+	if [ "$1" = "alias" ] ; then
 		USRLOC_TABLE="$ALS_TABLE"
 		if [ -z "$USRLOC_TABLE" ] ; then
 			USRLOC_TABLE=aliases
 		fi
 		CHECK_SUB=1
-	elif [ $1 = "ul" ] ; then
+	elif [ "$1" = "ul" ] ; then
 		USRLOC_TABLE="$UL_TABLE"
 		if [ -z $USRLOC_TABLE ] ; then
 			USRLOC_TABLE=location
 		fi
 		CHECK_SUB=0
-	elif [ $1 = "usrloc" ] ; then
+	elif [ "$1" = "usrloc" ] ; then
 		USRLOC_TABLE="$UL_TABLE"
 		if [ -z $USRLOC_TABLE ] ; then
 			USRLOC_TABLE=location
@@ -2377,10 +2385,10 @@ usrloc() {
 	fi
 	shift
 
-	case $1 in 
+	case "$1" in 
 		show)
 			if [ $# -eq 2 ] ; then
-				if [ $2 = "--brief" ] ; then
+				if [ "$2" = "--brief" ] ; then
 					$CTLCMD ul_dump brief
 				else
 					set_user $2
@@ -2478,7 +2486,7 @@ usrloc() {
 
 tls_ca() {
 
-	if [ $1 = "rootCA" ] ; then
+	if [ "$1" = "rootCA" ] ; then
 		if [ -z $2 ] ; then
 			# use default
 			CA_BASE=$ETCDIR/tls
@@ -2533,7 +2541,7 @@ tls_ca() {
 		minfo "Private key can be found in $CA_PATH/private/cakey.pem"
 		minfo "Certificate can be found in $CA_PATH/cacert.pem"
 
-	elif [ $1 = "userCERT" ] ; then
+	elif [ "$1" = "userCERT" ] ; then
 
 		if [ -z $2 ] ; then
 			merr "Missing user name parameter"
@@ -2610,10 +2618,38 @@ tls_ca() {
 		minfo "CA-List is locate at $USER_DIR/$USER-calist.pem "
 
 	else
-		merr "unknown TLS command $1"
+		[ -n "$1" ] && merr "unknown TLS command: \"$1\""
 		usage_tls
 		exit 1
 	fi
+}
+
+##### ================================================ #####
+### trap with gdb opensips processes
+#
+
+opensips_trap() {
+	if [ -z "$GDB" ] ; then
+		merr "'gdb' tool not found: set GDB variable to correct tool path"
+		exit
+	fi
+	DATE=`/bin/date +%Y%m%d_%H%M%S`
+	LOG_FILE=/tmp/gdb_opensips_$DATE
+	minfo "Trap file: $LOG_FILE"
+	$CTLCMD ps > $LOG_FILE
+	echo -n "Trapping OpenSIPS with gdb: "
+	PID_TIMESTAMP_VECTOR=`sed -e 's/.*PID=\([0-9]*\).*/\1/' $LOG_FILE`
+	minfo "$PID_TIMESTAMP_VECTOR"
+	for pid in $PID_TIMESTAMP_VECTOR
+	do
+		echo -n "."
+		PID=`echo $pid | cut -d '-' -f 1`
+		echo "" >> $LOG_FILE
+		echo "---start $PID -----------------------------------------------------" >> $LOG_FILE
+		$GDB opensips $PID -batch --eval-command="bt full" 2>&1 >> $LOG_FILE
+		echo "---end $PID -------------------------------------------------------" >> $LOG_FILE
+	done
+	echo "."
 }
 
 #
@@ -2753,6 +2789,11 @@ case $1 in
 	tls)
 		shift
 		tls_ca "$@"
+		;;
+
+	trap)
+		require_ctlengine
+		opensips_trap
 		;;
 
 	start)

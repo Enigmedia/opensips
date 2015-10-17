@@ -16,8 +16,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -172,7 +172,7 @@ static inline struct sr_timer* new_sr_timer(char *label, timer_function f,
 
 /*register a periodic timer;
  * ret: <0 on error
- * Hint: if you need it in a module, register it from mod_init or it 
+ * Hint: if you need it in a module, register it from mod_init or it
  * won't work otherwise*/
 int register_timer(char *label, timer_function f, void* param,
 													unsigned int interval)
@@ -370,7 +370,7 @@ static inline void timer_ticker(struct sr_timer *timer_list, utime_t *drift)
 	utime_t ij;
 	utime_t ij_marker;
 
-	/* we need to store the original time as while executing the 
+	/* we need to store the original time as while executing the
 	   the handlers, the time may progress, affecting the way we
 	   calculate the new expire (expire will include the time
 	   taken to run handlers) -bogdan */
@@ -455,6 +455,12 @@ static void run_timer_process(struct sr_timer_process *tpl)
 		o_tv.tv_sec = UTIMER_TICK / 1000000;
 		o_tv.tv_usec = UTIMER_TICK % 1000000;
 		multiple = (( TIMER_TICK * 1000000 ) / UTIMER_TICK ) / 1000000;
+	}
+
+	if (tpl->utimer_list && tpl->utimer_list->label) {
+		set_proc_attrs("timer: %s", tpl->utimer_list->label);
+	} else if (tpl->timer_list && tpl->timer_list->label) {
+		set_proc_attrs("timer: %s", tpl->timer_list->label);
 	}
 
 	LM_DBG("tv = %ld, %ld , m=%d\n",
@@ -564,7 +570,7 @@ int start_timer_processes(void)
 	 *
 	 * The main reason for this change was when a function that relied
 	 * on jiffies for its timeouts got called from the timer thread and
-	 * was unable to detect timeouts. 
+	 * was unable to detect timeouts.
 	 */
 
 	if ( (pid=internal_fork("time_keeper"))<0 ) {
@@ -601,7 +607,7 @@ int start_timer_processes(void)
 					exit(-1);
 				}
 
-				if (send_status_code(0) < 0)
+				if (!no_daemon_mode && send_status_code(0) < 0)
 					LM_ERR("failed to send status code\n");
 				clean_write_pipeend();
 			} else

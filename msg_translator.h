@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -67,16 +67,24 @@ struct hostport {
 
 
 #define set_hostport(hp, msg) \
-	do{ \
-		if ((msg) && ((struct sip_msg*)(msg))->set_global_address.len) \
-			(hp)->host=&(((struct sip_msg*)(msg))->set_global_address); \
-		else \
-			(hp)->host=NULL; \
-		if ((msg) && ((struct sip_msg*)(msg))->set_global_port.len) \
-			(hp)->port=&(((struct sip_msg*)(msg))->set_global_port); \
-		else \
-			(hp)->port=NULL; \
-	}while(0)
+	do { \
+		if (!(msg)) \
+			(hp)->host = NULL; \
+		else { \
+			if (((struct sip_msg *)(msg))->set_global_address.s) \
+				(hp)->host = &(((struct sip_msg *)(msg))->set_global_address); \
+			else \
+				(hp)->host = &default_global_address; \
+		} \
+		if (!(msg)) \
+			(hp)->port = NULL; \
+		else { \
+			if (((struct sip_msg *)(msg))->set_global_port.s) \
+				(hp)->port = &(((struct sip_msg *)(msg))->set_global_port); \
+			else \
+				(hp)->port = &default_global_port; \
+		} \
+	} while (0)
 
 char * build_req_buf_from_sip_req (	struct sip_msg* msg,
 				unsigned int *returned_len, struct socket_info* send_sock,
@@ -98,7 +106,7 @@ char* via_builder( unsigned int *len,
 	str *branch, str* extra_params, int proto, struct hostport *hp );
 
 
-int branch_builder( unsigned int hash_index, 
+int branch_builder( unsigned int hash_index,
 	/* only either parameter useful */
 	unsigned int label, char * char_v,
 	int branch,
@@ -114,4 +122,11 @@ int lumps_len(struct sip_msg* msg, struct lump* lumps,
 		struct socket_info* send_sock);
 void process_lumps(	struct sip_msg* msg, struct lump* lumps, char* new_buf,
 		unsigned int* new_buf_offs, unsigned int* orig_offs, struct socket_info* send_sock);
+
+int is_del_via1_lump(struct sip_msg* msg);
+
+char* received_builder(struct sip_msg *msg, unsigned int *received_len);
+
+char* rport_builder(struct sip_msg *msg, unsigned int *rport_len);
+
 #endif

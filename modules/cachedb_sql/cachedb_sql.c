@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2011 OpenSIPS Solutions
+ * Copyright (C) 2013 Steve Frécinaux
+ *    Be IP s.a. http://www.beip.be
+ * Copyright (C) 2013 OpenSIPS Solutions
  *
  * This file is part of opensips, a free SIP server.
  *
@@ -20,7 +22,8 @@
  *
  * history:
  * ---------
- *  2013-01-xx  created (vlad-paiu)
+ *  2013-01-xx  created (Steve Frécinaux)
+ *  2013-01-xx  improved implementation of cachedb (vlad-paiu)
  */
 
 
@@ -53,7 +56,7 @@ static void destroy(void);
 #define EXPIRES_COL "expires"
 #define EXPIRES_COL_LEN (sizeof(EXPIRES_COL) - 1)
 
-#define CACHEDB_SQL_TABLE_VERSION	1
+#define CACHEDB_SQL_TABLE_VERSION	2
 
 static str db_url = {NULL, 0};
 static str db_table = str_init("cachedb");
@@ -217,9 +220,7 @@ static int dbcache_get(cachedb_con *con, str* attr, str* res)
 
 			if (res->s == NULL) {
 				LM_ERR("no more pkg\n");
-				if (cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
-					LM_ERR("failed to free result of query\n");
-				return -1;
+				goto out_err;
 			}
 
 			memcpy(res->s, (char*)RES_ROWS(db_res)[0].values[0].val.string_val, res->len);
@@ -230,9 +231,7 @@ static int dbcache_get(cachedb_con *con, str* attr, str* res)
 
 			if (res->s == NULL) {
 				LM_ERR("no more pkg\n");
-				if (cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
-					LM_DBG("failed to free result of query\n");
-				return -1;
+				goto out_err;
 			}
 
 			memcpy(res->s, (char*)RES_ROWS(db_res)[0].values[0].val.str_val.s, res->len);
@@ -242,20 +241,25 @@ static int dbcache_get(cachedb_con *con, str* attr, str* res)
 			res->s = pkg_malloc(res->len + 1);
 			if (res->s == NULL) {
 				LM_ERR("no more pkg\n");
-				if (cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
-					LM_DBG("failed to free result of query\n");
-				return -1;
+				goto out_err;
 			}
 			memcpy(res->s, (char*)RES_ROWS(db_res)[0].values[0].val.blob_val.s, res->len);
 			break;
 		default:
 			LM_ERR("unknown type of DB user column\n");
-			if (db_res != NULL && cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
-				LM_DBG("failed to freeing result of query\n");
-				return -1;
+			goto out_err;
 	}
 
+	if (cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
+		LM_DBG("failed to free result of query\n");
+
 	return 1;
+
+out_err:
+	if (cdb_dbf.free_result(cdb_db_handle, db_res) < 0)
+		LM_DBG("failed to free result of query\n");
+
+	return -1;
 }
 
 static int dbcache_remove(cachedb_con *con, str* attr)
@@ -293,7 +297,9 @@ static int dbcache_add(cachedb_con *con, str *attr, int val, int expires, int *n
 	else
 		expires = 0;
 
-	i = snprintf(query_buf, sizeof(query_buf), "insert into %.*s (%.*s, %.*s, %.*s) values ('%.*s', %d, %d) on duplicate key update %.*s=%.*s %c %d, %.*s=%d",
+	i = snprintf(query_buf, sizeof(query_buf),
+				 "insert into %.*s (%.*s, %.*s, %.*s) values ('%.*s', %d, %d)"
+				 "on duplicate key update %.*s=%.*s %c %d, %.*s=%d",
 				 db_table.len, db_table.s,
 				 key_column.len, key_column.s,
 				 counter_column.len, counter_column.s,
@@ -471,8 +477,11 @@ static int mod_init(void)
 		return -1;
 	}
 
+	/* do not close the connection here - since we're using a
+	global connection instead of relying on the cachedb interface
 	cdb_dbf.close(cdb_db_handle);
 	cdb_db_handle = 0;
+	*/
 
 	if(cache_clean_period <= 0) {
 			LM_ERR("wrong parameter cache_clean_period - need a postive value\n");

@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -58,8 +58,7 @@ typedef struct _dlg_cseq dlg_cseq_wrapper;
 
 typedef int (*create_dlg_f)(struct sip_msg *req,int flags);
 
-void init_dlg_handlers(char *rr_param,
-		pv_spec_t *timeout_avp, int default_timeout);
+void init_dlg_handlers(int default_timeout);
 
 void destroy_dlg_handlers();
 
@@ -71,12 +70,14 @@ void dlg_onroute(struct sip_msg* req, str *rr_param, void *param);
 
 void dlg_ontimeout( struct dlg_tl *tl);
 
+typedef int (*validate_dialog_f) (struct sip_msg* req, struct dlg_cell *dlg);
 int dlg_validate_dialog( struct sip_msg* req, struct dlg_cell *dlg);
 
+typedef int (*fix_route_dialog_f) (struct sip_msg *req,struct dlg_cell *dlg);
 int fix_route_dialog(struct sip_msg *req,struct dlg_cell *dlg);
 
-int terminate_dlg(unsigned int h_entry, unsigned int h_id);
-typedef int (*terminate_dlg_f)(unsigned int h_entry, unsigned int h_id);
+int terminate_dlg(unsigned int h_entry, unsigned int h_id,str *reason);
+typedef int (*terminate_dlg_f)(unsigned int h_entry, unsigned int h_id,str *reason);
 
 void unreference_dialog(void *dialog);
 

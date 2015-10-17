@@ -52,6 +52,10 @@ DEFS:=
 TLS?=
 SCTP?=
 
+# create the template only if the file is not yet created
+ifeq (,$(wildcard Makefile.conf))
+$(shell cp Makefile.conf.template Makefile.conf)
+endif
 include Makefile.conf
 include Makefile.sources
 include Makefile.defs
@@ -199,18 +203,42 @@ all: $(NAME) modules utils
 app: $(NAME)
 
 
+.PHONY: _modules
+_modules: $(modules)
+
+.PHONY: $(modules)
+$(modules):
+	@$(MAKE) --no-print-directory -C $@ && \
+		echo "Building $(notdir $@) module succeeded" || (\
+			status=$$?; \
+			echo "ERROR: Building $(notdir $@) module failed!"; \
+			exit $$status; \
+		)
+
 .PHONY: modules
 modules:
+ifeq (,$(FASTER))
 	@set -e; \
 	for r in $(modules) "" ; do \
 		if [ -n "$$r" ]; then \
 			if [ -d "$$r" ]; then \
 				echo  "" ; \
 				echo  "" ; \
-				$(MAKE) -C $$r ; \
+				$(MAKE) -j -C $$r ; \
 			fi ; \
 		fi ; \
-	done 
+	done
+else
+	@$(MAKE) _modules || ( \
+		status=$$?; \
+		if echo $(MAKEFLAGS) | grep -q -- --jobserver; then \
+			printf '\nBuilding one or more modules failed!\n'; \
+			printf 'Please re-run make without -j / --jobs to find out which.\n\n'; \
+		fi; \
+		exit $$status \
+	)
+endif
+
 
 .PHONY: modules-readme
 modules-readme:
@@ -365,11 +393,14 @@ dbg: $(NAME)
 
 dist: tar
 
-tar: 
+tar: $(NEWREVISION)
 	$(TAR) -C .. \
 		--exclude=$(notdir $(CURDIR))/tmp* \
 		--exclude=$(notdir $(CURDIR))/debian* \
 		--exclude=.svn* \
+		--exclude=.git \
+		--exclude=.gitignore \
+		--exclude=Makefile.conf \
 		--exclude=*.[do] \
 		--exclude=*.so \
 		--exclude=*.il \
@@ -404,13 +435,6 @@ bin:
 deb:
 	rm -f debian
 	ln -sf packaging/debian
-	dpkg-buildpackage -rfakeroot -tc $(DEBBUILD_EXTRA_OPTIONS)
-	rm -f debian
-
-.PHONY: deb-lenny
-deb-lenny:
-	rm -f debian
-	ln -sf packaging/debian-lenny debian
 	dpkg-buildpackage -rfakeroot -tc $(DEBBUILD_EXTRA_OPTIONS)
 	rm -f debian
 
@@ -449,7 +473,7 @@ opensipsmc: $(cfg-prefix)/$(cfg-dir) $(data-prefix)/$(data-dir)
 	mkdir -p $(data-prefix)/$(data-dir)/menuconfig_templates/
 	$(INSTALL_TOUCH) menuconfig/configs/* $(data-prefix)/$(data-dir)/menuconfig_templates/
 	$(INSTALL_CFG) menuconfig/configs/* $(data-prefix)/$(data-dir)/menuconfig_templates/
-	sed -i -e "s#/usr/local/lib/opensips#$(lib-dir)#" \
+	sed -i -e "s#/usr/.*lib/$(NAME)/modules/#$(modules-target)#" \
 		$(data-prefix)/$(data-dir)/menuconfig_templates/*
 
 .PHONY: dbschema

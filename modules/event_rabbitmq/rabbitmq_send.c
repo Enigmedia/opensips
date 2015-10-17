@@ -33,6 +33,13 @@
 #define RMQ_SIZE (sizeof(rmq_send_t *))
 #define IS_ERR(_err) (errno == _err)
 
+#ifdef HAVE_SCHED_YIELD
+#include <sched.h>
+#else
+#include <unistd.h>
+/** Fake sched_yield if no unistd.h include is available */
+        #define sched_yield()   sleep(0)
+#endif
 
 /* used to communicate with the sending process */
 static int rmq_pipe[2];
@@ -190,8 +197,8 @@ void rmq_free_param(rmq_params_t *rmqp)
 	if ((rmqp->flags & RMQ_PARAM_PASS) && rmqp->pass.s &&
 			rmqp->pass.s != (char *)RMQ_DEFAULT_UP)
 		shm_free(rmqp->pass.s);
-	if ((rmqp->flags & RMQ_PARAM_EXCH) && rmqp->exchange.s)
-		shm_free(rmqp->exchange.s);
+	if ((rmqp->flags & RMQ_PARAM_RKEY) && rmqp->routing_key.s)
+		shm_free(rmqp->routing_key.s);
 }
 
 
@@ -232,7 +239,7 @@ static int rmq_reconnect(evi_reply_sock *sock)
 {
 	rmq_params_t * rmqp = (rmq_params_t *)sock->params;
 
-	if (!rmqp || !(rmqp->flags & RMQ_PARAM_EXCH)) {
+	if (!rmqp || !(rmqp->flags & RMQ_PARAM_RKEY)) {
 		LM_ERR("not enough socket info\n");
 		return -1;
 	}
@@ -243,7 +250,6 @@ static int rmq_reconnect(evi_reply_sock *sock)
 			LM_ERR("cannot create new connection\n");
 			return -1;
 		}
-		rmqp->flags |= RMQ_PARAM_CONN;
 		rmqp->sock = amqp_open_socket(sock->address.s, sock->port);
 		if (rmqp->sock < 0) {
 			LM_ERR("cannot opens socket\n");
@@ -251,11 +257,26 @@ static int rmq_reconnect(evi_reply_sock *sock)
 		}
 		amqp_set_sockfd(rmqp->conn, rmqp->sock);
 
-		if (rmq_error("Logging in", amqp_login(rmqp->conn,
+/*
+librabbitmq-0.1-0.2 amqp.h
+RABBITMQ_EXPORT amqp_rpc_reply_t amqp_login(amqp_connection_state_t state,
+                                        char const *vhost,
+                                        int channel_max,
+                                        int frame_max,
+                                        int heartbeat,
+                                        amqp_sasl_method_enum sasl_method, ...);
+
+channel_max: the maximum number of channels per connection
+frame_max: maximum AMQP frame size for client
+*/
+
+		rmqp->flags |= RMQ_PARAM_CONN;
+		if (rmq_error("Logging in", amqp_login(
+				rmqp->conn,
 				RMQ_DEFAULT_VHOST,
 				0,
 				RMQ_DEFAULT_MAX,
-				0,
+				rmqp->heartbeat,
 				AMQP_SASL_METHOD_PLAIN,
 				rmqp->flags & RMQ_PARAM_USER ? rmqp->user.s : RMQ_DEFAULT_UP,
 				rmqp->flags & RMQ_PARAM_PASS ? rmqp->pass.s : RMQ_DEFAULT_UP)))
@@ -283,7 +304,7 @@ static int rmq_sendmsg(rmq_send_t *rmqs)
 	return amqp_basic_publish(rmqp->conn,
 			rmqp->channel,
 			AMQP_EMPTY_BYTES,
-			amqp_cstring_bytes(rmqp->exchange.s),
+			amqp_cstring_bytes(rmqp->routing_key.s),
 			0,
 			0,
 			0,
@@ -323,3 +344,4 @@ end:
 			shm_free(rmqs);
 	}
 }
+

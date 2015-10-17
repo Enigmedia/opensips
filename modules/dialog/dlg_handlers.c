@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -28,17 +28,17 @@
  * 2007-03-06  syncronized state machine added for dialog state. New tranzition
  *             design based on events; removed num_1xx and num_2xx (bogdan)
  * 2007-04-30  added dialog matching without DID (dialog ID), but based only
- *             on RFC3261 elements - based on an original patch submitted 
+ *             on RFC3261 elements - based on an original patch submitted
  *             by Michel Bensoussan <michel@extricom.com> (bogdan)
- * 2007-05-17  new feature: saving dialog info into a database if 
+ * 2007-05-17  new feature: saving dialog info into a database if
  *             realtime update is set(ancuta)
- * 2007-07-06  support for saving additional dialog info : cseq, contact, 
+ * 2007-07-06  support for saving additional dialog info : cseq, contact,
  *             route_set and socket_info for both caller and callee (ancuta)
  * 2007-07-10  Optimized dlg_match_mode 2 (DID_NONE), it now employs a proper
- *             hash table lookup and isn't dependant on the is_direction 
- *             function (which requires an RR param like dlg_match_mode 0 
- *             anyways.. ;) ; based on a patch from 
- *             Tavis Paquette <tavis@galaxytelecom.net> 
+ *             hash table lookup and isn't dependant on the is_direction
+ *             function (which requires an RR param like dlg_match_mode 0
+ *             anyways.. ;) ; based on a patch from
+ *             Tavis Paquette <tavis@galaxytelecom.net>
  *             and Peter Baer <pbaer@galaxytelecom.net>  (bogdan)
  * 2008-04-04  added direction reporting in dlg callbacks (bogdan)
  * 2009-09-09  support for early dialogs added; proper handling of cseq
@@ -70,9 +70,10 @@
 #include "dlg_profile.h"
 #include "dlg_req_within.h"
 #include "dlg_tophiding.h"
+#include "dlg_replication.h"
 
-static str       rr_param;
-static pv_spec_t *timeout_avp;
+extern str       rr_param;
+
 static int       default_timeout;
 static int       shutdown_done = 0;
 
@@ -86,14 +87,11 @@ extern stat_var *expired_dlgs;
 extern stat_var *failed_dlgs;
 
 int  last_dst_leg = -1;
+int  dlg_tmp_timeout = -1;
+int  dlg_tmp_timeout_id = -1;
 
-void init_dlg_handlers(char *rr_param_p,
-		pv_spec_t *timeout_avp_p ,int default_timeout_p)
+void init_dlg_handlers(int default_timeout_p)
 {
-	rr_param.s = rr_param_p;
-	rr_param.len = strlen(rr_param.s);
-
-	timeout_avp = timeout_avp_p;
 	default_timeout = default_timeout_p;
 }
 
@@ -161,7 +159,7 @@ static inline void get_routing_info(struct sip_msg *msg, int is_req,
 		}
 	}
 
-	/* extract the RR parts - parse all headers as we can have multiple 
+	/* extract the RR parts - parse all headers as we can have multiple
 	   RR headers in the same message */
 	if( parse_headers(msg,HDR_EOH_F,0)<0 ){
 		LM_ERR("failed to parse record route header\n");
@@ -186,12 +184,12 @@ static inline void get_routing_info(struct sip_msg *msg, int is_req,
 
 /*usage: dlg: the dialog to add cseq, contact & record_route
  * 		 msg: sip message
- * 		 flag: 0-for a request(INVITE), 
+ * 		 flag: 0-for a request(INVITE),
  * 		 		1- for a reply(200 ok)
  *
  *	for a request: get record route in normal order
  *	for a reply  : get in reverse order, skipping the ones from the request and
- *				   the proxies' own 
+ *				   the proxies' own
  */
 static int init_leg_info( struct dlg_cell *dlg, struct sip_msg *msg,
 					struct cell* t, str *tag,str *mangled_from,str *mangled_to)
@@ -236,7 +234,7 @@ static int init_leg_info( struct dlg_cell *dlg, struct sip_msg *msg,
 
 	LM_DBG("route_set %.*s, contact %.*s, cseq %.*s and bind_addr %.*s\n",
 		rr_set.len, ZSW(rr_set.s), contact.len, ZSW(contact.s),
-		cseq.len, cseq.s, 
+		cseq.len, cseq.s,
 		msg->rcv.bind_address->sock_str.len,
 		msg->rcv.bind_address->sock_str.s);
 
@@ -283,7 +281,7 @@ static inline str* extract_mangled_touri(str *mangled_to_hdr)
 		LM_ERR("bad to header [%.*s]\n",mangled_to_hdr->len,mangled_to_hdr->s);
 		return NULL;
 	}
-	
+
 	extracted_to_uri = to_b.uri;
 	free_to_params(&to_b);
 
@@ -342,7 +340,12 @@ static inline void push_reply_in_dialog(struct sip_msg *rpl, struct cell* t,
 	} else {
 		tag = get_to(rpl)->tag_value;
 		if (tag.s==0 || tag.len==0) {
-			LM_ERR("missing TAG param in TO hdr :-/\n");
+			/* Don't print error for final replies in DLG_STATE_UNCONFIRMED */
+			if (!(dlg->state == DLG_STATE_UNCONFIRMED &&
+				rpl->first_line.u.reply.statuscode >= 300)) {
+				LM_ERR("[%d] reply in dlg state [%d]: missing TAG param in TO hdr\n",
+					rpl->first_line.u.reply.statuscode, dlg->state);
+			}
 			tag.s = 0;
 			tag.len = 0;
 		}
@@ -391,6 +394,7 @@ routing_info:
 					((t->relaied_reply_branch>=0)?
 					(t->uac[t->relaied_reply_branch].added_rr):0);
 
+		LM_DBG("Skipping %d ,%d, %d, %d \n",skip_rrs, dlg->from_rr_nb,t->relaied_reply_branch,t->uac[t->relaied_reply_branch].added_rr);
 		get_routing_info(rpl, 0, &skip_rrs, &contact, &rr_set);
 		dlg_update_routing( dlg, leg, &rr_set, &contact );
 		if( rr_set.s )
@@ -441,7 +445,7 @@ static void dlg_onreply(struct cell* t, int type, struct tmcb_params *param)
 				}
 			}
 			push_reply_in_dialog( rpl, t, dlg,&mangled_from,&mangled_to);
-			if((dlg->flags & DLG_FLAG_TOPHIDING) && 
+			if((dlg->flags & DLG_FLAG_TOPHIDING) &&
 					dlg_th_onreply(dlg, rpl,req, 1, DLG_DIR_UPSTREAM) < 0)
 				LM_ERR("Failed to transform the reply for topology hiding\n");
 		} else {
@@ -461,6 +465,11 @@ static void dlg_onreply(struct cell* t, int type, struct tmcb_params *param)
 		}
 		return;
 	}
+	if (type==TMCB_RESPONSE_OUT) {
+		if (dlg->state == DLG_STATE_CONFIRMED_NA && replication_dests)
+			replicate_dialog_created(dlg);
+		return;
+	}
 
 	if (type==TMCB_TRANS_DELETED)
 		event = DLG_EVENT_TDEL;
@@ -471,12 +480,13 @@ static void dlg_onreply(struct cell* t, int type, struct tmcb_params *param)
 	else
 		event = DLG_EVENT_RPL3xx;
 
-	next_state_dlg( dlg, event, &old_state, &new_state, &unref);
+	last_dst_leg = DLG_CALLER_LEG;
+	next_state_dlg(dlg, event, DLG_DIR_UPSTREAM, &old_state, &new_state,
+	               &unref, 0);
 
-	if (new_state==DLG_STATE_EARLY) {
+	if (new_state==DLG_STATE_EARLY && old_state!=DLG_STATE_EARLY) {
 		run_dlg_callbacks(DLGCB_EARLY, dlg, rpl, DLG_DIR_UPSTREAM, 0);
-		if (old_state!=DLG_STATE_EARLY)
-			if_update_stat(dlg_enable_stats, early_dlgs, 1);
+	        if_update_stat(dlg_enable_stats, early_dlgs, 1);
 		return;
 	}
 
@@ -517,7 +527,7 @@ static void dlg_onreply(struct cell* t, int type, struct tmcb_params *param)
 			}
 		}
 
-		/* save the settings to the database, 
+		/* save the settings to the database,
 		 * if realtime saving mode configured- save dialog now
 		 * else: the next time the timer will fire the update*/
 		dlg->flags |= DLG_FLAG_NEW;
@@ -538,8 +548,10 @@ static void dlg_onreply(struct cell* t, int type, struct tmcb_params *param)
 		LM_DBG("dialog %p failed (negative reply)\n", dlg);
 
 		/*destroy linkers */
-		destroy_linkers(dlg->profile_links);
+		dlg_lock_dlg(dlg);
+		destroy_linkers(dlg->profile_links, 0);
 		dlg->profile_links = NULL;
+		dlg_unlock_dlg(dlg);
 
 		/* dialog setup not completed (3456XX) */
 		run_dlg_callbacks( DLGCB_FAILED, dlg, rpl, DLG_DIR_UPSTREAM, 0);
@@ -691,8 +703,8 @@ static void dlg_seq_down_onreply_mod_cseq(struct cell* t, int type,
 	if (update_msg_cseq((struct sip_msg *)param->rpl,&((dlg_cseq_wrapper *)*param->param)->cseq,0) != 0)
 		LM_ERR("failed to update CSEQ in msg\n");
 
-	if (type==TMCB_RESPONSE_FWDED &&  
-		(dlg->cbs.types)&DLGCB_RESPONSE_WITHIN) { 
+	if (type==TMCB_RESPONSE_FWDED &&
+		(dlg->cbs.types)&DLGCB_RESPONSE_WITHIN) {
 		run_dlg_callbacks(DLGCB_RESPONSE_WITHIN, dlg, param->rpl,
 			DLG_DIR_DOWNSTREAM, 0);
 		return;
@@ -726,8 +738,8 @@ static void dlg_seq_down_onreply(struct cell* t, int type,
 	if (shutdown_done || dlg==0)
 		return;
 
-	if (type==TMCB_RESPONSE_FWDED &&  
-		(dlg->cbs.types)&DLGCB_RESPONSE_WITHIN) { 
+	if (type==TMCB_RESPONSE_FWDED &&
+		(dlg->cbs.types)&DLGCB_RESPONSE_WITHIN) {
 		run_dlg_callbacks(DLGCB_RESPONSE_WITHIN, dlg, param->rpl,
 			DLG_DIR_DOWNSTREAM, 0);
 		return;
@@ -736,27 +748,10 @@ static void dlg_seq_down_onreply(struct cell* t, int type,
 	return;
 }
 
-inline static int get_dlg_timeout(struct sip_msg *req)
+inline static int get_dlg_timeout(struct sip_msg *msg)
 {
-	pv_value_t pv_val;
-
-	if( timeout_avp && pv_get_spec_value( req, timeout_avp, &pv_val)==0
-	&& pv_val.flags&PV_VAL_INT && pv_val.ri>0 ) {
-		return pv_val.ri;
-	}
-	LM_DBG("invalid AVP value, use default timeout\n");
-	return default_timeout;
-}
-
-inline static int get_dlg_timeout_update(struct sip_msg *req)
-{
-	pv_value_t pv_val;
-
-	if( timeout_avp && pv_get_spec_value( req, timeout_avp, &pv_val)==0
-	&& pv_val.flags&PV_VAL_INT && pv_val.ri>0 ) {
-		return pv_val.ri;
-	}
-	return 0;
+	return ((dlg_tmp_timeout != -1 && dlg_tmp_timeout_id == msg->id) ?
+			dlg_tmp_timeout: default_timeout);
 }
 
 
@@ -808,7 +803,7 @@ void dlg_onreq(struct cell* t, int type, struct tmcb_params *param)
 			/* fully init dialog -> check if attached to the transaction */
 			if (t->dialog_ctx==NULL) {
 
-				/* set a callback to remove the ref when transaction 
+				/* set a callback to remove the ref when transaction
 				 * is destroied */
 				if ( d_tmb.register_tmcb( NULL, t, TMCB_TRANS_DELETED,
 				tmcb_unreference_dialog, (void*)current_dlg_pointer, NULL)<0){
@@ -823,15 +818,13 @@ void dlg_onreq(struct cell* t, int type, struct tmcb_params *param)
 			return;
 		}
 
-		/* dialog was previously created by create_dialog() 
+		/* dialog was previously created by create_dialog()
 		   -> just do the last settings */
 		run_create_callbacks( current_dlg_pointer, param->req);
 
 		LM_DBG("t hash_index = %u, t label = %u\n",t->hash_index,t->label);
 		current_dlg_pointer->initial_t_hash_index = t->hash_index;
 		current_dlg_pointer->initial_t_label = t->label;
-
-		current_dlg_pointer->lifetime = get_dlg_timeout(param->req);
 
 		t->dialog_ctx = (void*)current_dlg_pointer;
 
@@ -845,7 +838,7 @@ int dlg_create_dialog(struct cell* t, struct sip_msg *req,unsigned int flags)
 {
 	struct dlg_cell *dlg;
 	str s;
-	int extra_ref;
+	int extra_ref,types;
 
 	/* module is stricly designed for dialog calls */
 	if (req->first_line.u.request.method_value!=METHOD_INVITE)
@@ -909,9 +902,14 @@ int dlg_create_dialog(struct cell* t, struct sip_msg *req,unsigned int flags)
 		goto error;
 	}
 
-	if ( d_tmb.register_tmcb( req, t,
-				TMCB_RESPONSE_PRE_OUT|TMCB_RESPONSE_FWDED|TMCB_TRANS_CANCELLED,
-				dlg_onreply, (void*)dlg, unreference_dialog_create)<0 ) {
+	types = TMCB_RESPONSE_PRE_OUT|TMCB_RESPONSE_FWDED|TMCB_TRANS_CANCELLED;
+	/* replicate dialogs after the 200 OK was fwded - speed & after all msg
+	 * processing was done ( eg. ACC ) */
+	if (replication_dests)
+		types |= TMCB_RESPONSE_OUT;
+
+	if ( d_tmb.register_tmcb( req, t,types,dlg_onreply, 
+	(void*)dlg, unreference_dialog_create)<0 ) {
 		LM_ERR("failed to register TMCB\n");
 		goto error;
 	}
@@ -924,17 +922,17 @@ int dlg_create_dialog(struct cell* t, struct sip_msg *req,unsigned int flags)
 		LM_DBG("t hash_index = %u, t label = %u\n",t->hash_index,t->label);
 		dlg->initial_t_hash_index = t->hash_index;
 		dlg->initial_t_label = t->label;
-		dlg->lifetime = get_dlg_timeout(req);
 
 		t->dialog_ctx = (void*) dlg;
 		dlg->flags |= DLG_FLAG_ISINIT;
 	}
+	dlg->lifetime = get_dlg_timeout(req);
 
 	if_update_stat( dlg_enable_stats, processed_dlgs, 1);
 
 	return 0;
 error:
-	unref_dlg(dlg,2);
+	unref_dlg(dlg,extra_ref);
 	dialog_cleanup( req, NULL);
 	if_update_stat(dlg_enable_stats, failed_dlgs, 1);
 	return -1;
@@ -958,7 +956,7 @@ static inline int update_cseqs(struct dlg_cell *dlg, struct sip_msg *req,
 static inline int switch_cseqs(struct dlg_cell *dlg,unsigned int leg_no)
 {
 	str* r_cseq,*prev_cseq;
-	
+
 	r_cseq = &dlg->legs[leg_no].r_cseq;
 	prev_cseq = &dlg->legs[leg_no].prev_cseq;
 
@@ -980,14 +978,14 @@ static inline int switch_cseqs(struct dlg_cell *dlg,unsigned int leg_no)
 
 	memcpy( prev_cseq->s, r_cseq->s, r_cseq->len );
 	prev_cseq->len = r_cseq->len;
-	
+
 	LM_DBG("prev_cseq = %.*s for leg %d\n",prev_cseq->len,prev_cseq->s,leg_no);
 	return 0;
 }
 
 static inline void log_bogus_dst_leg(struct dlg_cell *dlg)
 {
-	if (last_dst_leg>=dlg->legs_no[DLG_LEGS_USED]) 
+	if (last_dst_leg>=dlg->legs_no[DLG_LEGS_USED])
 		LM_CRIT("bogus dst leg %d in state %d for dlg %p [%u:%u] with "
 			"clid '%.*s' and tags '%.*s' '%.*s'. legs used %d\n",
 			last_dst_leg,dlg->state, dlg, dlg->h_entry, dlg->h_id,
@@ -1009,7 +1007,6 @@ void dlg_onroute(struct sip_msg* req, str *route_params, void *param)
 	int old_state;
 	int unref;
 	int event;
-	int timeout;
 	unsigned int update_val;
 	unsigned int dir,dst_leg,src_leg;
 	int ret = 0,ok = 1;
@@ -1017,8 +1014,8 @@ void dlg_onroute(struct sip_msg* req, str *route_params, void *param)
 	str *msg_cseq;
 	char *final_cseq;
 
-	/* as this callback is triggered from loose_route, which can be 
-	   accidentaly called more than once from script, we need to be sure 
+	/* as this callback is triggered from loose_route, which can be
+	   accidentaly called more than once from script, we need to be sure
 	   we do this only once !*/
 	if (current_dlg_pointer)
 		return;
@@ -1068,25 +1065,32 @@ void dlg_onroute(struct sip_msg* req, str *route_params, void *param)
 					return;
 				}
 				if (match_dialog(dlg,&callid,&ftag,&ttag,&dir, &dst_leg )==0){
-					LM_WARN("tight matching failed for %.*s with "
-						"callid='%.*s'/%d,"
-						" ftag='%.*s'/%d, ttag='%.*s'/%d and direction=%d\n",
-						req->first_line.u.request.method.len,
-						req->first_line.u.request.method.s,
-						callid.len, callid.s, callid.len,
-						ftag.len, ftag.s, ftag.len,
-						ttag.len, ttag.s, ttag.len, dir);
-					LM_WARN("dialog identification elements are "
-						"callid='%.*s'/%d, "
-						"caller tag='%.*s'/%d, callee tag='%.*s'/%d\n",
-						dlg->callid.len, dlg->callid.s, dlg->callid.len,
-						dlg->legs[DLG_CALLER_LEG].tag.len,
-						dlg->legs[DLG_CALLER_LEG].tag.s,
-						dlg->legs[DLG_CALLER_LEG].tag.len,
-						dlg->legs[callee_idx(dlg)].tag.len,
-						ZSW(dlg->legs[callee_idx(dlg)].tag.s),
-						dlg->legs[callee_idx(dlg)].tag.len);
+					if (!accept_replicated_dlg) {
+						/* not an error when accepting replicating dialogs -
+						   we might have generated a different h_id when
+						   accepting the replicated dialog */
+						LM_WARN("tight matching failed for %.*s with "
+							"callid='%.*s'/%d,"
+							" ftag='%.*s'/%d, ttag='%.*s'/%d and direction=%d\n",
+							req->first_line.u.request.method.len,
+							req->first_line.u.request.method.s,
+							callid.len, callid.s, callid.len,
+							ftag.len, ftag.s, ftag.len,
+							ttag.len, ttag.s, ttag.len, dir);
+						LM_WARN("dialog identification elements are "
+							"callid='%.*s'/%d, "
+							"caller tag='%.*s'/%d, callee tag='%.*s'/%d\n",
+							dlg->callid.len, dlg->callid.s, dlg->callid.len,
+							dlg->legs[DLG_CALLER_LEG].tag.len,
+							dlg->legs[DLG_CALLER_LEG].tag.s,
+							dlg->legs[DLG_CALLER_LEG].tag.len,
+							dlg->legs[callee_idx(dlg)].tag.len,
+							ZSW(dlg->legs[callee_idx(dlg)].tag.s),
+							dlg->legs[callee_idx(dlg)].tag.len);
+					}
 					unref_dlg(dlg, 1);
+					/* potentially fall through to SIP-wise dialog matching,
+					   depending on seq_match_mode */
 					dlg = NULL;
 				}
 			}
@@ -1123,8 +1127,7 @@ void dlg_onroute(struct sip_msg* req, str *route_params, void *param)
 	/* save last_dst_leg before running state machine
 	 * helpful for logging various bogus cases according to the RFC */
 	last_dst_leg = dst_leg;
-
-	next_state_dlg( dlg, event, &old_state, &new_state, &unref);
+	next_state_dlg( dlg, event, dir, &old_state, &new_state, &unref, 0);
 
 	/* set current dialog - it will keep a ref! */
 	set_current_dialog(dlg);
@@ -1138,11 +1141,19 @@ void dlg_onroute(struct sip_msg* req, str *route_params, void *param)
 	/* run actions for the transition */
 	if (event==DLG_EVENT_REQBYE && new_state==DLG_STATE_DELETED &&
 	old_state!=DLG_STATE_DELETED) {
-		
+
 		/*destroy linkers */
-		destroy_linkers(dlg->profile_links);
+		dlg_lock_dlg(dlg);
+		destroy_linkers(dlg->profile_links, 0);
 		dlg->profile_links = NULL;
-		
+		dlg_unlock_dlg(dlg);
+
+		if (!dlg->terminate_reason.s) {
+			if (last_dst_leg == 0)
+				init_dlg_term_reason(dlg,"Upstream BYE",sizeof("Upstream BYE")-1);
+			else
+				init_dlg_term_reason(dlg,"Downstream BYE",sizeof("Downstream BYE")-1);
+		}
 
 		LM_DBG("BYE successfully processed - dst_leg = %d\n",last_dst_leg);
 
@@ -1224,16 +1235,22 @@ after_unlock5:
 		LM_DBG("sequential request successfully processed (dst_leg=%d)\n",
 			dst_leg);
 
+		if (dlg_tmp_timeout != -1 && dlg_tmp_timeout_id == req->id) {
+			dlg->lifetime = dlg_tmp_timeout;
+			dlg->lifetime_dirty = 1;
+		} else {
+			dlg->lifetime_dirty = 0;
+		}
+
 		/* within dialog request */
 		run_dlg_callbacks( DLGCB_REQ_WITHIN, dlg, req, dir, 0);
 
-		timeout = get_dlg_timeout_update(req);
 		/* update timer during sequential request? */
-		if (timeout != 0) {
-			dlg->lifetime = timeout;
+		if (dlg->lifetime_dirty) {
 			if (update_dlg_timer( &dlg->tl, dlg->lifetime )==-1)
 				LM_ERR("failed to update dialog lifetime\n");
 		}
+		LM_DBG("dialog_timeout: %d\n", dlg->lifetime);
 		if ( event!=DLG_EVENT_REQACK ) {
 
 			if (dst_leg==-1 || switch_cseqs(dlg, dst_leg) != 0 ||
@@ -1254,13 +1271,13 @@ after_unlock5:
 				}
 			}
 
-			if (dlg->flags & DLG_FLAG_PING_CALLER || 
+			if (dlg->flags & DLG_FLAG_PING_CALLER ||
 					dlg->flags & DLG_FLAG_PING_CALLEE) {
 
 				dlg_lock (d_table, d_entry);
 
 				if (dlg->legs[dst_leg].last_gen_cseq) {
-					
+
 					update_val = ++(dlg->legs[dst_leg].last_gen_cseq);
 					dlg_unlock( d_table, d_entry );
 
@@ -1277,11 +1294,14 @@ after_unlock5:
 				dlg->flags |= DLG_FLAG_CHANGED;
 				if ( dlg_db_mode==DB_MODE_REALTIME )
 					update_dialog_dbinfo(dlg);
+
+				if (replication_dests)
+					replicate_dialog_updated(dlg);
 			}
 		}
 		else
 		{
-			if (dlg->flags & DLG_FLAG_PING_CALLER || 
+			if (dlg->flags & DLG_FLAG_PING_CALLER ||
 					dlg->flags & DLG_FLAG_PING_CALLEE) {
 
 				dlg_lock (d_table, d_entry);
@@ -1294,7 +1314,7 @@ after_unlock5:
 						LM_ERR("failed to update ACK msg cseq\n");
 					}
 				}
-				else 
+				else
 					dlg_unlock( d_table, d_entry );
 			}
 		}
@@ -1377,6 +1397,9 @@ early_check:
 		dlg->flags |= DLG_FLAG_CHANGED;
 		if(dlg_db_mode == DB_MODE_REALTIME)
 			update_dialog_dbinfo(dlg);
+
+		if (replication_dests)
+			replicate_dialog_updated(dlg);
 	}
 
 	return;
@@ -1403,6 +1426,9 @@ void dlg_ontimeout( struct dlg_tl *tl)
 
 	if ( (dlg->flags&DLG_FLAG_BYEONTIMEOUT) &&
 	(dlg->state==DLG_STATE_CONFIRMED_NA || dlg->state==DLG_STATE_CONFIRMED)) {
+
+		init_dlg_term_reason(dlg,"Lifetime Timeout",sizeof("Lifetime Timeout")-1);
+
 		/* we just send the BYEs in both directions */
 		dlg_end_dlg( dlg, NULL);
 		/* dialog is no longer refed by timer; from now one it is refed
@@ -1413,7 +1439,10 @@ void dlg_ontimeout( struct dlg_tl *tl)
 		return ;
 	}
 
-	next_state_dlg( dlg, DLG_EVENT_REQBYE, &old_state, &new_state, &unref);
+	/* act like as if we've received a BYE from caller */
+	last_dst_leg = dlg->legs_no[DLG_LEG_200OK];
+	next_state_dlg( dlg, DLG_EVENT_REQBYE, DLG_DIR_DOWNSTREAM, &old_state,
+	               &new_state, &unref, 0);
 
 	if (new_state==DLG_STATE_DELETED && old_state!=DLG_STATE_DELETED) {
 		LM_DBG("timeout for dlg with CallID '%.*s' and tags '%.*s' '%.*s'\n",
@@ -1424,8 +1453,10 @@ void dlg_ontimeout( struct dlg_tl *tl)
 			ZSW(dlg->legs[callee_idx(dlg)].tag.s));
 
 		/*destroy linkers */
-		destroy_linkers(dlg->profile_links);
+		dlg_lock_dlg(dlg);
+		destroy_linkers(dlg->profile_links, 0);
 		dlg->profile_links = NULL;
+		dlg_unlock_dlg(dlg);
 
 		/* dialog timeout */
 		run_dlg_callbacks( DLGCB_EXPIRED, dlg, 0, DLG_DIR_NONE, 0);
@@ -1518,15 +1549,18 @@ int fix_route_dialog(struct sip_msg *req,struct dlg_cell *dlg)
 			LM_ERR("failed to parse headers when looking after ROUTEs\n");
 			return -1;
 		}
-		
+
 		buf = req->buf;
 
 		if (req->route) {
-			for (it=req->route;it;it=it->sibling)
+			for (it=req->route;it;it=it->sibling) {
+				if (it->parsed && ((rr_t*)it->parsed)->deleted)
+					continue;
 				if ((lmp = del_lump(req,it->name.s - buf,it->len,HDR_ROUTE_T)) == 0) {
 					LM_ERR("del_lump failed \n");
 					return -1;
 				}
+			}
 		}
 
 		if ( leg->route_set.len !=0 && leg->route_set.s) {
@@ -1556,7 +1590,7 @@ int fix_route_dialog(struct sip_msg *req,struct dlg_cell *dlg)
 				pkg_free(route);
 				return -1;
 			}
-			
+
 			LM_DBG("Setting route  header to <%s> \n",route);
 
 			if (parse_rr_body(leg->route_set.s,leg->route_set.len,&head) != 0) {
@@ -1584,11 +1618,13 @@ int fix_route_dialog(struct sip_msg *req,struct dlg_cell *dlg)
 			LM_ERR("failed to parse headers when looking after ROUTEs\n");
 			return -1;
 		}
-		
+
 		buf = req->buf;
 
 		if (req->route) {
 			for (it=req->route;it;it=it->sibling)
+				if (it->parsed && ((rr_t*)it->parsed)->deleted)
+					continue;
 				if ((lmp = del_lump(req,it->name.s - buf,it->len,HDR_ROUTE_T)) == 0) {
 					LM_ERR("del_lump failed \n");
 					return -1;
@@ -1656,7 +1692,7 @@ int fix_route_dialog(struct sip_msg *req,struct dlg_cell *dlg)
 					return -1;
 				}
 			}
-			
+
 			if (leg->contact.len && leg->contact.s) {
 				size = leg->contact.len + ROUTE_PREF_LEN + ROUTE_SUFF_LEN;
 				remote_contact = pkg_malloc(size);
@@ -1805,7 +1841,7 @@ int dlg_validate_dialog( struct sip_msg* req, struct dlg_cell *dlg)
 	return 0;
 }
 
-int terminate_dlg(unsigned int h_entry, unsigned int h_id)
+int terminate_dlg(unsigned int h_entry, unsigned int h_id,str *reason)
 {
 	struct dlg_cell * dlg = NULL;
 	int ret = 0;
@@ -1814,7 +1850,9 @@ int terminate_dlg(unsigned int h_entry, unsigned int h_id)
 
 	if(!dlg)
 		return 0;
-	
+
+	init_dlg_term_reason(dlg,reason->s,reason->len);
+
 	if ( dlg_end_dlg( dlg, 0) ) {
 		LM_ERR("Failed to end dialog");
 		ret = -1;

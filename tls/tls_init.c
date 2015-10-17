@@ -17,13 +17,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <stdio.h>
- 
+
 #include "tls_init.h"
 #include "tls_config.h"
 #include "../dprint.h"
@@ -43,20 +43,19 @@
 #include <netinet/ip.h>
 #include <unistd.h>
 
-#define SER_SSL_SESS_ID ((unsigned char*)"opensips-tls-1.2.0")
-#define SER_SSL_SESS_ID_LEN (sizeof(SER_SSL_SESS_ID)-1)
+#define OS_SSL_SESS_ID ((unsigned char*)"opensips-tls-1.11.0")
+#define OS_SSL_SESS_ID_LEN (sizeof(OS_SSL_SESS_ID)-1)
 
-
-#if OPENSSL_VERSION_NUMBER < 0x00907000L
+#if OPENSSL_VERSION_NUMBER < 0x10001000L
 	#warning ""
 	#warning "=============================================================="
-	#warning "Your version of OpenSSL is < 0.9.7."
+	#warning "Your version of OpenSSL is < 1.0.1."
 	#warning " Upgrade for better compatibility, features and security fixes!"
 	#warning "============================================================="
 	#warning ""
 #endif
 
-SSL_METHOD     *ssl_methods[TLS_USE_SSLv23 + 1];
+SSL_METHOD     *ssl_methods[TLS_USE_TLSv1_2 + 1];
 
 #define VERIFY_DEPTH_S 3
 
@@ -67,7 +66,7 @@ struct CRYPTO_dynlock_value {
 	gen_lock_t lock;
 };
 
-/* This callback is called during each verification process, 
+/* This callback is called during each verification process,
 at each step during the chain of certificates (this function
 is not the certificate_verification one!). */
 int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
@@ -81,21 +80,21 @@ int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
 		LM_NOTICE("cert chain too long ( depth > VERIFY_DEPTH_S)\n");
 		pre_verify_ok=0;
 	}
-	
+
 	if( pre_verify_ok ) {
 		LM_NOTICE("preverify is good: verify return: %d\n", pre_verify_ok);
 		return pre_verify_ok;
 	}
-	
+
 	err_cert = X509_STORE_CTX_get_current_cert(ctx);
-	err = X509_STORE_CTX_get_error(ctx);	
+	err = X509_STORE_CTX_get_error(ctx);
 	X509_NAME_oneline(X509_get_subject_name(err_cert),buf,sizeof buf);
-	
+
 	LM_NOTICE("subject = %s\n", buf);
 	LM_NOTICE("verify error:num=%d:%s\n",
 		err, X509_verify_cert_error_string(err));
 	LM_NOTICE("error code is %d\n", ctx->error);
-	
+
 	switch (ctx->error) {
 		case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
 			X509_NAME_oneline(X509_get_issuer_name(ctx->current_cert),
@@ -145,13 +144,13 @@ int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
 		case X509_V_ERR_CERT_REJECTED:
 			LM_NOTICE("certificate rejected\n");
 			break;
-		
+
 		default:
 			LM_NOTICE("something wrong with the cert"
 				" ... error code is %d (check x509_vfy.h)\n", ctx->error);
 			break;
 	}
-	
+
 	LM_NOTICE("verify return:%d\n", pre_verify_ok);
 	return(pre_verify_ok);
 }
@@ -163,7 +162,7 @@ passwd_cb(char *buf, int size, int rwflag, void *filename)
 #if OPENSSL_VERSION_NUMBER >= 0x00907000L
 	UI             *ui;
 	const char     *prompt;
-	
+
 	ui = UI_new();
 	if (ui == NULL)
 		goto err;
@@ -179,14 +178,14 @@ err:
 	if (ui)
 		UI_free(ui);
 	return 0;
-	
+
 #else
 	if( des_read_pw_string(buf, size-1, "Enter Private Key password:", 0) ) {
 		LM_ERR("passwd_cb failed\n");
 		return 0;
 	}
 	return strlen( buf );
-	
+
 #endif
 }
 
@@ -211,7 +210,8 @@ ser_realloc(void *ptr, size_t size)
 static void
 ser_free(void *ptr)
 {
-	shm_free(ptr);
+	if (ptr)
+		shm_free(ptr);
 }
 
 
@@ -219,9 +219,9 @@ int
 tls_init(struct socket_info *si)
 {
 	LM_DBG("entered\n");
-	
+
 	/*
-	 * reuse tcp initialization 
+	 * reuse tcp initialization
 	 */
 	if (tcp_init(si) < 0) {
 		LM_ERR("failed to initialize TCP part\n");
@@ -240,8 +240,8 @@ tls_init(struct socket_info *si)
 }
 
 /*
- * load a certificate from a file 
- * (certificate file can be a chain, starting by the user cert, 
+ * load a certificate from a file
+ * (certificate file can be a chain, starting by the user cert,
  * and ending in the root CA; if not all needed certs are in this
  * file, they are looked up in the caFile or caPATH (see verify
  * function).
@@ -263,14 +263,14 @@ load_certificate(SSL_CTX * ctx, char *filename)
 
 #define NUM_RETRIES 3
 /*
- * load a private key from a file 
+ * load a private key from a file
  */
 static int
 load_private_key(SSL_CTX * ctx, char *filename)
 {
 	int idx, ret_pwd;
 	LM_DBG("entered\n");
-	
+
 	SSL_CTX_set_default_passwd_cb(ctx, passwd_cb);
 	SSL_CTX_set_default_passwd_cb_userdata(ctx, filename);
 
@@ -285,24 +285,24 @@ load_private_key(SSL_CTX * ctx, char *filename)
 			continue;
 		}
 	}
-	
+
 	if( ! ret_pwd ) {
 		LM_ERR("unable to load private key file '%s'\n",
 			filename);
 		return -1;
 	}
-	
+
 	if (!SSL_CTX_check_private_key(ctx)) {
 		LM_ERR("key '%s' does not match the public key of the certificate\n",
 			filename);
 		return -1;
 	}
-	
+
 	LM_DBG("key '%s' successfuly loaded\n", filename);
 	return 0;
 }
 
-/*  
+/*
  * Load a caList, to be used to verify the client's certificate.
  * The list is to be stored in a single file, containing all
  * the acceptable root certificates.
@@ -315,14 +315,93 @@ load_ca(SSL_CTX * ctx, char *filename)
 		LM_ERR("unable to load ca '%s'\n", filename);
 		return -1;
 	}
-	
+
 	LM_DBG("CA '%s' successfuly loaded\n", filename);
 	return 0;
 }
 
 
 /*
- * initialize ssl methods 
+ * Load a caList from a directory instead of a single file.
+ */
+static int
+load_ca_dir(SSL_CTX * ctx, char *directory)
+{
+        LM_DBG("Entered\n");
+        if (!SSL_CTX_load_verify_locations(ctx, 0 , directory)) {
+                LM_ERR("unable to load ca directory '%s'\n", directory);
+                return -1;
+        }
+
+        LM_DBG("CA '%s' successfuly loaded from directory\n", directory);
+        return 0;
+}
+
+
+#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
+/*
+ * Load and set DH params to be used in ephemeral key exchange from a file.
+ */
+static int
+set_dh_params(SSL_CTX * ctx, char *filename)
+{
+	LM_DBG("Entered\n");
+	BIO *bio = BIO_new_file(filename, "r");
+	if (!bio) {
+		LM_ERR("unable to open dh params file '%s'\n", filename);
+		return -1;
+	}
+
+	DH *dh = PEM_read_bio_DHparams(bio, 0, 0, 0);
+	BIO_free(bio);
+	if (!dh) {
+		LM_ERR("unable to read dh params from '%s'\n", filename);
+		return -1;
+	}
+
+	if (!SSL_CTX_set_tmp_dh(ctx, dh)) {
+		LM_ERR("unable to set dh params\n");
+		return -1;
+	}
+
+	DH_free(dh);
+	LM_DBG("DH params from '%s' successfuly set\n", filename);
+	return 0;
+}
+
+
+/*
+ * Set elliptic curve.
+ */
+static int set_ec_params(SSL_CTX * ctx, const char* curve_name)
+{
+	int curve = 0;
+	if (curve_name) {
+		curve = OBJ_txt2nid(curve_name);
+	}
+	if (curve > 0) {
+		EC_KEY *ecdh = EC_KEY_new_by_curve_name (curve);
+		if (! ecdh) {
+			LM_ERR("unable to create EC curve\n");
+			return -1;
+		}
+		if (1 != SSL_CTX_set_tmp_ecdh (ctx, ecdh)) {
+			LM_ERR("unable to set tmp_ecdh\n");
+			return -1;
+		}
+		EC_KEY_free (ecdh);
+	}
+	else {
+		LM_ERR("unable to find the EC curve\n");
+		return -1;
+	}
+    return 0;
+}
+#endif
+
+
+/*
+ * initialize ssl methods
  */
 static void
 init_ssl_methods(void)
@@ -330,22 +409,29 @@ init_ssl_methods(void)
 	LM_DBG("entered\n");
 
 #ifndef OPENSSL_NO_SSL2
-	ssl_methods[TLS_USE_SSLv2_cli - 1] = SSLv2_client_method();
-	ssl_methods[TLS_USE_SSLv2_srv - 1] = SSLv2_server_method();
-	ssl_methods[TLS_USE_SSLv2 - 1] = SSLv2_method();
+	ssl_methods[TLS_USE_SSLv2_cli - 1] = (SSL_METHOD*)SSLv2_client_method();
+	ssl_methods[TLS_USE_SSLv2_srv - 1] = (SSL_METHOD*)SSLv2_server_method();
+	ssl_methods[TLS_USE_SSLv2 - 1] = (SSL_METHOD*)SSLv2_method();
 #endif
 
-	ssl_methods[TLS_USE_SSLv3_cli - 1] = SSLv3_client_method();
-	ssl_methods[TLS_USE_SSLv3_srv - 1] = SSLv3_server_method();
-	ssl_methods[TLS_USE_SSLv3 - 1] = SSLv3_method();
-	
-	ssl_methods[TLS_USE_TLSv1_cli - 1] = TLSv1_client_method();
-	ssl_methods[TLS_USE_TLSv1_srv - 1] = TLSv1_server_method();
-	ssl_methods[TLS_USE_TLSv1 - 1] = TLSv1_method();
-	
-	ssl_methods[TLS_USE_SSLv23_cli - 1] = SSLv23_client_method();
-	ssl_methods[TLS_USE_SSLv23_srv - 1] = SSLv23_server_method();
-	ssl_methods[TLS_USE_SSLv23 - 1] = SSLv23_method();
+	ssl_methods[TLS_USE_SSLv3_cli - 1] = (SSL_METHOD*)SSLv3_client_method();
+	ssl_methods[TLS_USE_SSLv3_srv - 1] = (SSL_METHOD*)SSLv3_server_method();
+	ssl_methods[TLS_USE_SSLv3 - 1] = (SSL_METHOD*)SSLv3_method();
+
+	ssl_methods[TLS_USE_TLSv1_cli - 1] = (SSL_METHOD*)TLSv1_client_method();
+	ssl_methods[TLS_USE_TLSv1_srv - 1] = (SSL_METHOD*)TLSv1_server_method();
+	ssl_methods[TLS_USE_TLSv1 - 1] = (SSL_METHOD*)TLSv1_method();
+
+	ssl_methods[TLS_USE_SSLv23_cli - 1] = (SSL_METHOD*)SSLv23_client_method();
+	ssl_methods[TLS_USE_SSLv23_srv - 1] = (SSL_METHOD*)SSLv23_server_method();
+	ssl_methods[TLS_USE_SSLv23 - 1] = (SSL_METHOD*)SSLv23_method();
+
+#if OPENSSL_VERSION_NUMBER >= 0x10001000L
+	ssl_methods[TLS_USE_TLSv1_2_cli - 1] = (SSL_METHOD*)TLSv1_2_client_method();
+	ssl_methods[TLS_USE_TLSv1_2_srv - 1] = (SSL_METHOD*)TLSv1_2_server_method();
+	ssl_methods[TLS_USE_TLSv1_2 - 1] = (SSL_METHOD*)TLSv1_2_method();
+#endif
+
 }
 
 
@@ -356,6 +442,35 @@ init_ssl_methods(void)
 static int
 init_ssl_ctx_behavior( struct tls_domain *d ) {
 	int verify_mode;
+
+#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
+	/*
+	 * set dh params
+	 */
+	if (!d->tmp_dh_file) {
+			LM_DBG("no DH params file for tls[%s:%d] defined, "
+					"using default '%s'\n", ip_addr2a(&d->addr), d->port,
+					tls_tmp_dh_file);
+			d->tmp_dh_file = tls_tmp_dh_file;
+	}
+	if (d->tmp_dh_file && set_dh_params(d->ctx, d->tmp_dh_file) < 0)
+			return -1;
+
+	if (d->tls_ec_curve) {
+		if (set_ec_params(d->ctx, d->tls_ec_curve) < 0) {
+			return -1;
+		}
+	}
+	else {
+		LM_NOTICE("No EC curve defined\n");
+	}
+#else
+	if (d->tmp_dh_file  || tls_tmp_dh_file)
+		LM_WARN("DH params file discarded as not supported by your openSSL version\n");
+	if (d->tls_ec_curve)
+		LM_WARN("EC params file discarded as not supported by your openSSL version\n");
+#endif
+
 	if( d->ciphers_list != 0 ) {
 		if( SSL_CTX_set_cipher_list(d->ctx, d->ciphers_list) == 0 ) {
 			LM_ERR("failure to set SSL context "
@@ -368,13 +483,13 @@ init_ssl_ctx_behavior( struct tls_domain *d ) {
 		LM_DBG( "cipher list null ... setting default\n");
 	}
 
-	/* Set a bunch of options: 
+	/* Set a bunch of options:
 	 *     do not accept SSLv2
 	 *     no session resumption
 	 *     choose cipher according to server's preference's*/
 
 #if OPENSSL_VERSION_NUMBER >= 0x000907000
-	SSL_CTX_set_options(d->ctx, 
+	SSL_CTX_set_options(d->ctx,
 		SSL_OP_ALL | SSL_OP_NO_SSLv2 |
 		SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION |
 		SSL_OP_CIPHER_SERVER_PREFERENCE);
@@ -384,8 +499,8 @@ init_ssl_ctx_behavior( struct tls_domain *d ) {
 #endif
 
 	/* Set verification procedure
-	 * The verification can be made null with SSL_VERIFY_NONE, or 
-	 * at least easier with SSL_VERIFY_CLIENT_ONCE instead of 
+	 * The verification can be made null with SSL_VERIFY_NONE, or
+	 * at least easier with SSL_VERIFY_CLIENT_ONCE instead of
 	 * SSL_VERIFY_FAIL_IF_NO_PEER_CERT.
 	 * For extra control, instead of 0, we can specify a callback function:
 	 *           int (*verify_callback)(int, X509_STORE_CTX *)
@@ -395,23 +510,23 @@ init_ssl_ctx_behavior( struct tls_domain *d ) {
 	if (d->type & TLS_DOMAIN_SRV) {
 		/* Server mode:
 		 * SSL_VERIFY_NONE
-		 *   the server will not send a client certificate request to the 
+		 *   the server will not send a client certificate request to the
 		 *   client, so the client  will not send a certificate.
 		 * SSL_VERIFY_PEER
-		 *   the server sends a client certificate request to the client. 
-		 *   The certificate returned (if any) is checked. If the verification 
-		 *   process fails, the TLS/SSL handshake is immediately terminated 
-		 *   with an alert message containing the reason for the verification 
-		 *   failure. The behaviour can be controlled by the additional 
+		 *   the server sends a client certificate request to the client.
+		 *   The certificate returned (if any) is checked. If the verification
+		 *   process fails, the TLS/SSL handshake is immediately terminated
+		 *   with an alert message containing the reason for the verification
+		 *   failure. The behaviour can be controlled by the additional
 		 *   SSL_VERIFY_FAIL_IF_NO_PEER_CERT and SSL_VERIFY_CLIENT_ONCE flags.
 		 * SSL_VERIFY_FAIL_IF_NO_PEER_CERT
-		 *   if the client did not return a certificate, the TLS/SSL handshake 
-		 *   is immediately terminated with a ``handshake failure'' alert. 
+		 *   if the client did not return a certificate, the TLS/SSL handshake
+		 *   is immediately terminated with a ``handshake failure'' alert.
 		 *   This flag must be used together with SSL_VERIFY_PEER.
 		 * SSL_VERIFY_CLIENT_ONCE
-		 *   only request a client certificate on the initial TLS/SSL 
-		 *   handshake. Do not ask for a client certificate again in case of 
-		 *   a renegotiation. This flag must be used together with 
+		 *   only request a client certificate on the initial TLS/SSL
+		 *   handshake. Do not ask for a client certificate again in case of
+		 *   a renegotiation. This flag must be used together with
 		 *   SSL_VERIFY_PEER.
 		 */
 
@@ -431,17 +546,17 @@ init_ssl_ctx_behavior( struct tls_domain *d ) {
 	} else {
 		/* Client mode:
 		 * SSL_VERIFY_NONE
-		 *   if not using an anonymous cipher (by default disabled), the 
-		 *   server will send a certificate which will be checked. The result 
-		 *   of the certificate verification process can be checked after the 
+		 *   if not using an anonymous cipher (by default disabled), the
+		 *   server will send a certificate which will be checked. The result
+		 *   of the certificate verification process can be checked after the
 		 *   TLS/SSL handshake using the SSL_get_verify_result(3) function.
-		 *   The handshake will be continued regardless of the verification 
+		 *   The handshake will be continued regardless of the verification
 		 *   result.
 		 * SSL_VERIFY_PEER
-		 *   the server certificate is verified. If the verification process 
-		 *   fails, the TLS/SSL handshake is immediately terminated with an 
+		 *   the server certificate is verified. If the verification process
+		 *   fails, the TLS/SSL handshake is immediately terminated with an
 		 *   alert message containing the reason for the verification failure.
-		 *   If no server certificate is sent, because an anonymous cipher is 
+		 *   If no server certificate is sent, because an anonymous cipher is
 		 *   used, SSL_VERIFY_PEER is ignored.
 		 * SSL_VERIFY_FAIL_IF_NO_PEER_CERT
 		 *   ignored
@@ -457,13 +572,13 @@ init_ssl_ctx_behavior( struct tls_domain *d ) {
 			LM_WARN("server verification NOT activated. Weaker security.\n");
 		}
 	}
-	
+
 	SSL_CTX_set_verify( d->ctx, verify_mode, verify_callback);
 	SSL_CTX_set_verify_depth( d->ctx, VERIFY_DEPTH_S);
 
 	SSL_CTX_set_session_cache_mode( d->ctx, SSL_SESS_CACHE_SERVER );
-	SSL_CTX_set_session_id_context( d->ctx, SER_SSL_SESS_ID, 
-		SER_SSL_SESS_ID_LEN );
+	SSL_CTX_set_session_id_context( d->ctx, OS_SSL_SESS_ID,
+		OS_SSL_SESS_ID_LEN );
 
 	return 0;
 }
@@ -556,7 +671,7 @@ int tls_init_multithread(void)
 
 	if (tls_static_locks_no>0) {
 		/* init a lock set & pass locking function to SSL */
-		tls_static_locks = lock_set_alloc(tls_static_locks_no); 
+		tls_static_locks = lock_set_alloc(tls_static_locks_no);
 		if (tls_static_locks == NULL) {
 			LM_ERR("Failed to alloc static locks\n");
 			return -1;
@@ -580,7 +695,7 @@ int tls_init_multithread(void)
 }
 
 /*
- * called once from main.c (main process) 
+ * called once from main.c (main process)
  */
 int
 init_tls(void)
@@ -598,7 +713,7 @@ init_tls(void)
 
 	/*
 	* this has to be called before any function calling CRYPTO_malloc,
-	* CRYPTO_malloc will set allow_customize in openssl to 0 
+	* CRYPTO_malloc will set allow_customize in openssl to 0
 	*/
 	if (!CRYPTO_set_mem_functions(ser_malloc, ser_realloc, ser_free)) {
 		LM_ERR("unable to set the memory allocation functions\n");
@@ -631,7 +746,7 @@ init_tls(void)
 		return -1;
 	}
 
-	if ( ( i ^ 
+	if ( ( i ^
 #ifndef OPENSSL_NO_KRB5
 	1
 #else
@@ -645,7 +760,7 @@ init_tls(void)
 	}
 
 	/*
-	 * now initialize tls default domains 
+	 * now initialize tls default domains
 	 */
 	if ( (i=init_tls_domains(tls_default_server_domain)) ) {
 		return i;
@@ -654,7 +769,7 @@ init_tls(void)
 		return i;
 	}
 	/*
-	 * now initialize tls virtual domains 
+	 * now initialize tls virtual domains
 	 */
 	if ( (i=init_tls_domains(tls_server_domains)) ) {
 		return i;
@@ -663,7 +778,7 @@ init_tls(void)
 		return i;
 	}
 	/*
-	 * we are all set 
+	 * we are all set
 	 */
 	return 0;
 }
@@ -687,16 +802,16 @@ init_tls_domains(struct tls_domain *d)
 		}
 
 		/*
-		* set method 
+		* set method
 		*/
 		if (d->method == TLS_METHOD_UNSPEC) {
 			LM_DBG("no method for tls[%s:%d], using default\n",
 				ip_addr2a(&d->addr), d->port);
 			d->method = tls_method;
 		}
-	
+
 		/*
-		* create context 
+		* create context
 		*/
 		d->ctx = SSL_CTX_new(ssl_methods[d->method - 1]);
 		if (d->ctx == NULL) {
@@ -708,7 +823,7 @@ init_tls_domains(struct tls_domain *d)
 			return -1;
 
 		/*
-		* load certificate 
+		* load certificate
 		*/
 		if (!d->cert_file) {
 			LM_NOTICE("no certificate for tls[%s:%d] defined, using default"
@@ -717,9 +832,9 @@ init_tls_domains(struct tls_domain *d)
 		}
 		if (load_certificate(d->ctx, d->cert_file) < 0)
 			return -1;
-	
+
 		/*
-		* load ca 
+		* load ca
 		*/
 		if (!d->ca_file) {
 			LM_NOTICE("no CA for tls[%s:%d] defined, "
@@ -729,11 +844,26 @@ init_tls_domains(struct tls_domain *d)
 		}
 		if (d->ca_file && load_ca(d->ctx, d->ca_file) < 0)
 			return -1;
+
+		/*
+		* load ca from directory
+		*/
+		if (!d->ca_directory) {
+
+			LM_NOTICE("no CA for tls[%s:%d] defined, "
+				"using default '%s'\n", ip_addr2a(&d->addr), d->port,
+				 tls_ca_dir);
+			d->ca_directory = tls_ca_dir;
+		}
+
+		if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0)
+			return -1;
+
 		d = d->next;
 	}
 
 	/*
-	* load all private keys as the last step (may prompt for password) 
+	* load all private keys as the last step (may prompt for password)
 	*/
 	d = dom;
 	while (d) {
@@ -750,14 +880,14 @@ init_tls_domains(struct tls_domain *d)
 }
 
 /*
- * called from main.c when opensips exits (main process) 
+ * called from main.c when opensips exits (main process)
  */
 void
 destroy_tls(void)
 {
 	struct tls_domain *d;
 	LM_DBG("entered\n");
-	
+
 	d = tls_server_domains;
 	while (d) {
 		if (d->ctx)

@@ -41,11 +41,11 @@
 #define DEFAULT_Q_VALUE          10
 
 static int shmcontact2dset(struct sip_msg *req, struct sip_msg *shrpl,
-		long max, struct acc_param *reason);
+		long max, pv_elem_t *reason);
 
 
 int get_redirect( struct sip_msg *msg , int maxt, int maxb,
-												struct acc_param *reason)
+												pv_elem_t *reason)
 {
 	struct cell *t;
 	int max;
@@ -159,7 +159,7 @@ static void sort_contacts(contact_t *ct_list, str *ct_array,
  *            n - ok and n contacts added
  */
 static int shmcontact2dset(struct sip_msg *req, struct sip_msg *sh_rpl,
-											long max, struct acc_param *reason)
+											long max, pv_elem_t *reason)
 {
 	static struct sip_msg  dup_rpl;
 	static str scontacts[MAX_CONTACTS_PER_REPLY];
@@ -182,7 +182,7 @@ static int shmcontact2dset(struct sip_msg *req, struct sip_msg *sh_rpl,
 		return 0;
 
 	if ( sh_rpl->msg_flags&FL_SHM_CLONE ) {
-		/* duplicate the reply into private memory to be able 
+		/* duplicate the reply into private memory to be able
 		 * to parse it and after words to free the parsed mems */
 		memcpy( &dup_rpl, sh_rpl, sizeof(struct sip_msg) );
 		LM_DBG("duplicating shm reply\n");
@@ -275,7 +275,7 @@ static int shmcontact2dset(struct sip_msg *req, struct sip_msg *sh_rpl,
 			backup_uri = req->new_uri;
 			req->new_uri =  scontacts[i];
 			//FIXME
-			rd_acc_fct( req, (char*)reason, acc_db_table, 
+			rd_acc_fct( req, (char*)reason, acc_db_table,
 					NULL, NULL, NULL, NULL);
 			req->new_uri = backup_uri;
 		}
@@ -289,7 +289,7 @@ restore:
 			free_contact( (contact_body_t**)(void*)(&hdr->parsed) );
 		/* are any new headers found? */
 		if (dup_rpl.last_header!=sh_rpl->last_header) {
-			/* identify in the new headere list (from dup_rpl) 
+			/* identify in the new headere list (from dup_rpl)
 			 * the sh_rpl->last_header and start remove everything after */
 			hdr = sh_rpl->last_header;
 			free_hdr_field_lst(hdr->next);

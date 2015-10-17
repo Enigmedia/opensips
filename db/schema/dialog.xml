@@ -9,7 +9,7 @@
 
 <table id="dialog" xmlns:db="http://docbook.org/ns/docbook">
 	<name>dialog</name>
-	<version>8</version>
+	<version>9</version>
 	<type db="mysql">&MYSQL_TABLE_TYPE;</type>
 	<description>
 		<db:para>Persistent dialog information for the dialog module. More 
@@ -22,7 +22,7 @@
 		<type>unsigned long</type>
 		<size>&table_id_len;</size>
 		<primary/>
-		<type db="dbtext">long,auto</type>
+		<type db="dbtext">long</type>
 		<description>h_entry | h_id</description>
 	</column>
 
@@ -184,8 +184,8 @@
 
 	<column>
 		<name>vars</name>
-		<type>text</type>
-		<size>512</size>
+		<type>binary</type>
+		<size>4096</size>
 		<default><null/></default>
 		<null/>
 		<description>Variables attached to this dialog.</description>

@@ -1,3 +1,28 @@
+/*
+ * Copyright (C) 2012 OpenSIPS Solutions
+ *
+ * This file is part of opensips, a free SIP server.
+ *
+ * opensips is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * opensips is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ *
+ *
+ * history:
+ * ---------
+ *  2012-05-xx  created (razvancrainea)
+ */
+
 #include "../../sr_module.h"
 #include "../../resolve.h"
 #include "../../evi/evi_transport.h"
@@ -8,6 +33,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+extern unsigned xmlrpc_struct_on;
 
 /**
  * module functions
@@ -33,6 +60,13 @@ static proc_export_t procs[] = {
 	{0,0,0,0,0,0}
 };
 
+/* module parameters */
+static param_export_t mod_params[] = {
+	{"use_struct_param",		INT_PARAM, &xmlrpc_struct_on},
+	{0,0,0}
+};
+
+
 /**
  * module exports
  */
@@ -41,7 +75,7 @@ struct module_exports exports= {
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,			/* dlopen flags */
 	0,							/* exported functions */
-	0,							/* exported parameters */
+	mod_params,					/* exported parameters */
 	0,							/* exported statistics */
 	0,							/* exported MI functions */
 	0,							/* exported pseudo-variables */
@@ -54,7 +88,7 @@ struct module_exports exports= {
 
 
 /**
- * exported functions for core event interface 
+ * exported functions for core event interface
  */
 static evi_export_t trans_export_xmlrpc = {
 	XMLRPC_STR,					/* transport module name */
@@ -153,7 +187,7 @@ static evi_reply_sock* xmlrpc_parse(str socket)
 
 	LM_DBG("host is %.*s - remains <%.*s>[%d]\n", host.len, host.s,
 			socket.len, socket.s, socket.len);
-	
+
 	if (!socket.len || *socket.s == '\0') {
 		LM_ERR("invalid port number\n");
 		return NULL;
@@ -181,10 +215,10 @@ static evi_reply_sock* xmlrpc_parse(str socket)
 		LM_ERR("invalid method name\n");
 		return NULL;
 	}
-	
+
 	LM_DBG("method is %.*s[%d]\n", socket.len, socket.s, socket.len);
 
-	len = sizeof(evi_reply_sock) - sizeof(void*) + sizeof(str) + 
+	len = sizeof(evi_reply_sock) - sizeof(void*) + sizeof(str) +
 		host.len + socket.len;
 	sock = shm_malloc(len);
 	if (!sock) {
@@ -270,7 +304,7 @@ static str xmlrpc_print(evi_reply_sock *sock)
 		aux.s = int2str(sock->port, &aux.len);
 		DO_PRINT(aux.s, aux.len);
 	}
-		
+
 	if (sock->flags & EVI_PARAMS) {
 		DO_PRINT(":", 1);
 		method = (str *) &sock->params;

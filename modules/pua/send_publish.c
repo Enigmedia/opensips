@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -89,7 +89,7 @@ str* publ_build_hdr(int expires, pua_event_t* ev, str* content_type, str* etag,
 	str_hdr->len+= len;
 	memcpy(str_hdr->s+str_hdr->len, CRLF, CRLF_LEN);
 	str_hdr->len += CRLF_LEN;
-	
+
 	if(etag)
 	{
 		LM_DBG("UPDATE_TYPE [etag]= %.*s\n", etag->len, etag->s);
@@ -101,13 +101,13 @@ str* publ_build_hdr(int expires, pua_event_t* ev, str* content_type, str* etag,
 		str_hdr->len += CRLF_LEN;
 	}
 	if(is_body)
-	{	
+	{
 		if(content_type== NULL || content_type->s== NULL || content_type->len== 0)
 		{
-			ctype= ev->content_type; /* use event default value */ 
+			ctype= ev->content_type; /* use event default value */
 		}
 		else
-		{	
+		{
 			ctype.s=   content_type->s;
 			ctype.len= content_type->len;
 		}
@@ -377,7 +377,7 @@ int send_publish_int(ua_pres_t* presentity, publ_info_t* publ, pua_event_t* ev,
 		int hash_index)
 {
 	unsigned long pres_id= 0;
-	int ret = -1;
+	int ret = ERR_PUBLISH_GENERIC;
 	char etag_buf[256];
 	char tuple_buf[128];
 	str tuple_id= {0, 0};
@@ -409,6 +409,7 @@ int send_publish_int(ua_pres_t* presentity, publ_info_t* publ, pua_event_t* ev,
 			memcpy(tuple_id.s, presentity->tuple_id.s, presentity->tuple_id.len);
 			tuple_id.len = presentity->tuple_id.len;
 		}
+               presentity->desired_expires= publ->expires + (int)time(NULL);
 
 		presentity->waiting_reply = 1;
 		presentity->cb_param = publ->cb_param;
@@ -446,6 +447,7 @@ int send_publish_int(ua_pres_t* presentity, publ_info_t* publ, pua_event_t* ev,
 		{
 			LM_DBG("request for a publish with expires 0 and"
 					" no record found\n");
+			ret = ERR_PUBLISH_NO_RECORD;
 			goto error;
 		}
 		if(publ->body== NULL)
@@ -460,7 +462,7 @@ int send_publish_int(ua_pres_t* presentity, publ_info_t* publ, pua_event_t* ev,
 		pres_id = new_publ_record(publ, ev, &tuple_id);
 	}
 
-	str_hdr = publ_build_hdr(((publ->expires< 0)?3600:publ->expires), ev, &publ->content_type, 
+	str_hdr = publ_build_hdr(((publ->expires< 0)?3600:publ->expires), ev, &publ->content_type,
 				(etag.s?&etag:NULL), publ->extra_headers, ((body)?1:0));
 	if(str_hdr == NULL)
 	{
@@ -495,7 +497,7 @@ int send_publish_int(ua_pres_t* presentity, publ_info_t* publ, pua_event_t* ev,
 		pkg_free(body);
 	}
 
-	return 0;
+	return ERR_PUBLISH_NO_ERROR;
 
 error:
 	if(body && ev->process_body)
@@ -550,21 +552,42 @@ int send_publish( publ_info_t* publ )
 		lock_release(&HashT->p_records[hash_code].lock);
 		return 418;
 	}
-	if(presentity && presentity->waiting_reply)
+	if(presentity)
 	{
-		LM_DBG("Presentity is waiting for reply, queue this PUBLISH\n");
-		last = &presentity->pending_publ;
-		while (*last)
-			last = &((*last)->next);
-		*last = build_pending_publ(publ);
-		if(! *last)
+		/* handle extra headers */
+		if(presentity->extra_headers.s) shm_free(presentity->extra_headers.s);
+		presentity->extra_headers.len= 0;
+		if(publ->extra_headers && publ->extra_headers->s && publ->extra_headers->len)
 		{
-			LM_ERR("Failed to create pending publ record\n");
-			lock_release(&HashT->p_records[hash_code].lock);
-			return -1;
+			presentity->extra_headers.s= (char*)shm_malloc(publ->extra_headers->len);
+			if(presentity->extra_headers.s == NULL)
+			{
+				LM_ERR("while processing extra_headers\n");
+				lock_release(&HashT->p_records[hash_code].lock);
+				return -1;
+			}
+			memcpy(presentity->extra_headers.s, publ->extra_headers->s,
+					publ->extra_headers->len);
+			presentity->extra_headers.len= publ->extra_headers->len;
 		}
-		lock_release(&HashT->p_records[hash_code].lock);
-		return 0;
+		if(presentity->db_flag == NO_UPDATEDB_FLAG)
+			presentity->db_flag= UPDATEDB_FLAG;
+		if (presentity->waiting_reply)
+		{
+			LM_DBG("Presentity is waiting for reply, queue this PUBLISH\n");
+			last = &presentity->pending_publ;
+			while (*last)
+				last = &((*last)->next);
+			*last = build_pending_publ(publ);
+			if(! *last)
+			{
+				LM_ERR("Failed to create pending publ record\n");
+				lock_release(&HashT->p_records[hash_code].lock);
+				return -1;
+			}
+			lock_release(&HashT->p_records[hash_code].lock);
+			return 0;
+		}
 	}
 
 	return send_publish_int(presentity, publ, ev, hash_code);

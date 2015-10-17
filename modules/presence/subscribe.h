@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -56,8 +56,8 @@ struct subscription
 	str from_tag;
 	str callid;
 	struct socket_info* sockinfo;
-	unsigned int remote_cseq; 
-	unsigned int local_cseq; 
+	unsigned int remote_cseq;
+	unsigned int local_cseq;
 	str contact;
 	str local_contact;
 	str record_route;
@@ -85,7 +85,7 @@ void timer_db_update(unsigned int ticks,void *param);
 
 int update_subs_db(subs_t* subs, int type);
 
-int refresh_watcher(str* pres_uri, str* watcher_uri, str* event, 
+int refresh_watcher(str* pres_uri, str* watcher_uri, str* event,
 	int status, str* reason);
 
 typedef int (*refresh_watcher_t)(str*, str* , str* ,int , str* );
@@ -104,5 +104,7 @@ int extract_sdialog_info(subs_t* subs,struct sip_msg* msg, int max_expire,
 		int* to_tag_gen, str local_address);
 typedef int (*extract_sdialog_info_t)(subs_t* subs, struct sip_msg* msg,
 		int max_expire, int* to_tag_gen, str local_address);
+
+int update_subscription(struct sip_msg* msg, subs_t* subs, int init_req);
 
 #endif

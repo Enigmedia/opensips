@@ -1,8 +1,50 @@
-opensips (1.9.1-1) stable; urgency=low
+opensips (1.11.5-1) stable; urgency=low
 
   * Major Public Release.
 
- -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Wed, 08 May 2013 20:09:07 +0200
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Thu, 07 May 2015 16:21:55 +0300
+
+
+opensips (1.11.4-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Thu, 02 Apr 2015 19:18:39 +0300
+
+
+opensips (1.11.3-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Wed, 15 Oct 2014 18:56:15 +0300
+
+
+opensips (1.11.2-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Wed, 02 Jul 2014 16:56:07 +0300
+
+
+opensips (1.11.1-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Wed, 07 May 2014 21:37:55 +0300
+
+
+opensips (1.11.0-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Thu, 20 Mar 2014 21:32:16 +0200
+
+
+opensips (1.10.0-1) stable; urgency=low
+
+  * Major Public Release.
+
+ -- Bogdan-Andrei Iancu <bogdan@opensips.org>  Mon, 05 Aug 2013 16:31:46 +0200
 
 
 opensips (1.9.0-1) stable; urgency=low

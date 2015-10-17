@@ -12,8 +12,7 @@ Daniel-Constantin Mierla
 
    Copyright © 2006 Voice Sistem SRL
    Revision History
-   Revision $Revision$ $Date: 2012-02-22 19:29:43 +0200
-                              (Wed, 22 Feb 2012) $
+   Revision $Revision: 8740 $ $Date$
      __________________________________________________________
 
    Table of Contents
@@ -182,7 +181,7 @@ modparam("siptrace", "traced_user_avp", "$avp(user)")
    The name of the AVP storing the name of the table where to
    store the SIP messages. If it is not set, the value of 'table'
    parameter is used. In this way one can select dynamically where
-   to store the traced messages. The table must exists, and must
+   to store the traced messages. The table must exist, and must
    have the same structure as 'sip_trace' table.
 
    Default value is "NULL" (feature disabled).

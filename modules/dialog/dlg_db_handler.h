@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -39,7 +39,6 @@
 #define TO_TAG_COL				"to_tag"
 #define HASH_ID_COL				"hash_id"
 #define HASH_ENTRY_COL			"hash_entry"
-#define USER_FLAGS_COL			"user_flags"
 #define STATE_COL				"state"
 #define START_TIME_COL			"start_time"
 #define TIMEOUT_COL				"timeout"
@@ -61,7 +60,7 @@
 #define FLAGS_COL				"flags"
 #define DIALOG_TABLE_NAME		"dialog"
 
-#define DLG_TABLE_VERSION		8
+#define DLG_TABLE_VERSION		9
 
 /*every minute the dialogs' information will be refreshed*/
 #define DB_DEFAULT_UPDATE_PERIOD	60
@@ -94,6 +93,7 @@ extern str from_sock_column;
 extern str profiles_column;
 extern str vars_column;
 extern str sflags_column;
+extern str flags_column;
 extern str th_column;
 extern str dialog_table_name;
 extern int dlg_db_mode;
@@ -108,8 +108,16 @@ void destroy_dlg_db();
 
 int remove_dialog_from_db(struct dlg_cell * cell);
 int update_dialog_dbinfo(struct dlg_cell * cell);
+int update_dialog_timeout_info(struct dlg_cell * cell);
 void dialog_update_db(unsigned int ticks, void * param);
 
+void read_dialog_vars(char *b, int l, struct dlg_cell *dlg);
+void read_dialog_profiles(char *b, int l, struct dlg_cell *dlg,
+                          int double_check, char is_replicated);
+str* write_dialog_vars(struct dlg_val *vars);
+str* write_dialog_profiles(struct dlg_profile_link *links);
+
 struct mi_root* mi_sync_db_dlg(struct mi_root *cmd, void *param);
+struct mi_root* mi_restore_dlg_db(struct mi_root *cmd, void *param);
 
 #endif

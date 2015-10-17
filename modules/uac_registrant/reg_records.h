@@ -37,6 +37,7 @@
 #include "../../mem/shm_mem.h"
 #include "../tm/dlg.h"
 #include "../tm/tm_load.h"
+#include "../../sliblist.h"
 
 
 #define NOT_REGISTERED_STATE	0
@@ -82,7 +83,8 @@ typedef struct reg_record {
 } reg_record_t;
 
 typedef struct reg_entry {
-	reg_record_t *first;
+	slinkedl_list_t *p_list;
+	slinkedl_list_t *s_list;
 	gen_lock_t lock;
 } reg_entry_t;
 
@@ -91,11 +93,13 @@ typedef reg_entry_t *reg_table_t;
 extern reg_table_t reg_htable;
 extern unsigned int reg_hsize;
 
+void *reg_alloc(size_t size);
+void reg_free(void *ptr);
 int init_reg_htable(void);
 void destroy_reg_htable(void);
 
 void new_call_id_ftag_4_record(reg_record_t *rec, str *now);
-int add_record(uac_reg_map_t *uac, str *now);
+int add_record(uac_reg_map_t *uac, str *now, unsigned int plist);
 void reg_print_record(reg_record_t *rec);
 
 #endif

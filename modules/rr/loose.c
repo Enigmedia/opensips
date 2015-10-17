@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -27,7 +27,7 @@
  * 2003-01-27 next baby-step to removing ZT - PRESERVE_ZT (jiri)
  * 2005-04-10 check_route_param() and all hooks for keeping reference to
  *            Route params added (bogdan)
- * 2005-10-17 fixed socket selection when double routing changes 
+ * 2005-10-17 fixed socket selection when double routing changes
  *            the port or the IP address (bogdan)
  */
 
@@ -111,7 +111,7 @@ static int is_preloaded(struct sip_msg* msg)
 
 /*
  * Parse the message and find first occurrence of
- * Route header field. The function returns -1 or -2 
+ * Route header field. The function returns -1 or -2
  * on a parser error, 0 if there is a Route HF and
  * 1 if there is no Route HF.
  */
@@ -199,7 +199,7 @@ static inline int is_2rr(str* _params)
 			default:              break;
 			}
 			break;
-			
+
 		case 5:
 			switch(s.s[i]) {
 			case '\\': state = 6; break;
@@ -211,7 +211,7 @@ static inline int is_2rr(str* _params)
 		case 6: state = 5; break;
 		}
 	}
-	
+
 	if ((state == 2) || (state == 3)) return 1;
 	else return 0;
 }
@@ -227,7 +227,7 @@ static inline int is_myself(str* _host, unsigned short _port)
 #endif
 {
 	int ret;
-	
+
 	ret = check_self(_host, _port ? _port : SIP_PORT, 0);/* match all protos*/
 	if (ret < 0) return 0;
 
@@ -239,7 +239,7 @@ static inline int is_myself(str* _host, unsigned short _port)
 		return -1;
 	}
 #endif
-	
+
 	return ret;
 }
 
@@ -372,12 +372,12 @@ static inline int get_maddr_uri(str *uri, struct sip_uri *puri)
 	}
 	memcpy( builturi, "sip:", 4 );
 	memcpy( builturi+4, puri->maddr_val.s, puri->maddr_val.len );
-		
+
 	if( puri->port.len > 0 )
 	{
 		builturi[4+puri->maddr_val.len] =':';
 		memcpy(builturi+5+puri->maddr_val.len, puri->port.s,
-				puri->port.len);			
+				puri->port.len);
 	}
 
 	uri->len = 4+puri->maddr_val.len
@@ -406,7 +406,7 @@ static inline int handle_sr(struct sip_msg* _m, struct hdr_field* _hdr, rr_t* _r
 		LM_ERR("failed to save Request-URI\n");
 		return -1;
 	}
-	
+
 	/* Put the first Route in Request-URI */
 
 	uri = _r->nameaddr.uri;
@@ -492,6 +492,7 @@ static inline int after_strict(struct sip_msg* _m)
 	char* rem_off;
 	str uri;
 	struct socket_info *si;
+	unsigned short port, proto;
 
 	hdr = _m->route;
 	rt = (rr_t*)hdr->parsed;
@@ -552,10 +553,21 @@ static inline int after_strict(struct sip_msg* _m)
 			LM_ERR("failed to parse URI\n");
 			return RR_ERROR;
 		}
+	} else {
+		port = _m->parsed_uri.port_no;
+		proto = _m->parsed_uri.proto;
+		set_sip_defaults(port, proto);
+		si = grep_sock_info( &_m->parsed_uri.host, port, proto);
+		if (si) {
+			_m->force_send_socket = si;
+		} else {
+			if (enable_socket_mismatch_warning)
+				LM_WARN("no socket found for match second RR\n");
+		}
 	}
 
 	/* set the hooks for the params -bogdan
-	 * important note: RURI is already parsed by the above function, so 
+	 * important note: RURI is already parsed by the above function, so
 	 * we just used it without any checking */
 	routed_msg_id = _m->id;
 	routed_params = _m->parsed_uri.params;
@@ -571,7 +583,7 @@ static inline int after_strict(struct sip_msg* _m)
 
 		/* Note: when there is only one Route URI left (endpoint), it will
 		 * always be a strict router because endpoints don't use ;lr parameter
-		 * In this case we will simply put the URI in R-URI and forward it, 
+		 * In this case we will simply put the URI in R-URI and forward it,
 		 * which will work perfectly */
 		if(get_maddr_uri(&uri, &puri)!=0) {
 			LM_ERR("failed to check maddr\n");
@@ -581,7 +593,7 @@ static inline int after_strict(struct sip_msg* _m)
 			LM_ERR("failed to rewrite request URI\n");
 			return RR_ERROR;
 		}
-		
+
 		if (rt->next) {
 			rem_off = hdr->body.s;
 			rem_len = rt->next->nameaddr.name.s - hdr->body.s;
@@ -611,8 +623,8 @@ static inline int after_strict(struct sip_msg* _m)
 		}
 
 		/* Next hop is a loose router - Which means that is is not endpoint yet
-		 * In This case we have to recover from previous strict routing, that 
-		 * means we have to find the last Route URI and put in in R-URI and 
+		 * In This case we have to recover from previous strict routing, that
+		 * means we have to find the last Route URI and put in in R-URI and
 		 * remove the last Route URI. */
 		if (rt != hdr->parsed) {
 			/* There is a previous route uri which was 2nd uri of mine
@@ -623,7 +635,7 @@ static inline int after_strict(struct sip_msg* _m)
 				LM_ERR("failed to remove Route HF\n");
 				return RR_ERROR;
 			}
-			
+
 			del_rt = (rr_t*)hdr->parsed;
 			/* mark route hdr as deleted */
 			del_rt->deleted = 1;
@@ -651,8 +663,8 @@ static inline int after_strict(struct sip_msg* _m)
 		/* mark remote contact route as deleted */
 		rt->deleted = 1;
 
-		/* The first character if uri will be either '<' when it is the 
-		 * only URI in a Route header field or ',' if there is more than 
+		/* The first character if uri will be either '<' when it is the
+		 * only URI in a Route header field or ',' if there is more than
 		 * one URI in the header field */
 		LM_DBG("The last route URI: '%.*s'\n", rt->nameaddr.uri.len,
 				ZSW(rt->nameaddr.uri.s));
@@ -670,7 +682,7 @@ static inline int after_strict(struct sip_msg* _m)
 		}
 
 	}
-	
+
 	/* run RR callbacks -bogdan */
 	run_rr_callbacks( _m, &routed_params );
 
@@ -682,6 +694,7 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 {
 	struct hdr_field* hdr;
 	struct sip_uri puri;
+	struct sip_uri puri2;
 	rr_t* rt;
 	int res;
 	int status;
@@ -690,6 +703,7 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 #endif
 	str uri;
 	struct socket_info *si;
+	int force_ss = 0;
 
 	hdr = _m->route;
 	rt = (rr_t*)hdr->parsed;
@@ -742,13 +756,15 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 
 				/*same case as LL , if there is no next route*/
 				routing_type = ROUTING_LL;
+				force_ss = 1;
 
 				goto done;
 			}
 			rt = (rr_t*)hdr->parsed;
 		} else rt = rt->next;
-		
+
 		if (enable_double_rr && is_2rr(&puri.params)) {
+			force_ss = 0;
 			/* double route may occure due different IP and port, so force as
 			 * send interface the one advertise in second Route */
 			if (parse_uri(rt->nameaddr.uri.s,rt->nameaddr.uri.len,&puri)<0) {
@@ -791,10 +807,12 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 				}
 				rt = (rr_t*)hdr->parsed;
 			} else rt = rt->next;
+		} else {
+			force_ss = 1;
 		}
-		
+
 		uri = rt->nameaddr.uri;
-		if (parse_uri(uri.s, uri.len, &puri) < 0) {
+		if (parse_uri(uri.s, uri.len, &puri2) < 0) {
 			LM_ERR("failed to parse the first route URI\n");
 			return RR_ERROR;
 		}
@@ -805,10 +823,11 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 			return NOT_RR_DRIVEN;
 #endif
 		LM_DBG("Topmost URI is NOT myself\n");
+		memcpy(&puri2, &puri, sizeof(struct sip_uri));
 	}
 
 	LM_DBG("URI to be processed: '%.*s'\n", uri.len, ZSW(uri.s));
-	if (is_strict(&puri.params)) {
+	if (is_strict(&puri2.params)) {
 		LM_DBG("Next URI is a strict router\n");
 
 		routing_type = ROUTING_LS;
@@ -822,7 +841,7 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 
 		routing_type = ROUTING_LL;
 
-		if(get_maddr_uri(&uri, &puri)!=0) {
+		if(get_maddr_uri(&uri, &puri2)!=0) {
 			LM_ERR("checking maddr failed\n");
 			return RR_ERROR;
 		}
@@ -834,7 +853,7 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 		/* There is a previous route uri which was 2nd uri of mine
 		 * and must be removed here */
 		if (rt != hdr->parsed) {
-			if (!del_lump(_m, hdr->body.s - _m->buf, 
+			if (!del_lump(_m, hdr->body.s - _m->buf,
 			rt->nameaddr.name.s - hdr->body.s, 0)) {
 				LM_ERR("failed to remove Route HF\n");
 				return RR_ERROR;
@@ -846,6 +865,8 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 	status = RR_DRIVEN;
 
 done:
+	if (force_ss && !preloaded)
+		_m->force_send_socket = _m->rcv.bind_address;
 	/* run RR callbacks -bogdan */
 	run_rr_callbacks( _m, &routed_params );
 	return status;
@@ -855,7 +876,7 @@ done:
 /*
  * Do loose routing as defined in RFC3261
  */
-int loose_route(struct sip_msg* _m, char* _s1, char* _s2)
+int loose_route(struct sip_msg* _m)
 {
 	int ret;
 
@@ -866,7 +887,7 @@ int loose_route(struct sip_msg* _m, char* _s1, char* _s2)
 		LM_DBG("There is no Route HF\n");
 		return -1;
 	}
-		
+
 	if (parse_sip_msg_uri(_m)<0) {
 		LM_ERR("failed to parse Request URI\n");
 		return -1;
@@ -1092,12 +1113,12 @@ str* get_remote_target(struct sip_msg *msg)
 	{
 		/* searching for last header field */
 		res = find_rem_target(msg, &hdr, &rt, &prev);
-		if (res < 0) 
+		if (res < 0)
 		{
 			LM_ERR("searching for last Route URI failed\n");
 			return 0;
-		} 
-		else if (res > 0) 
+		}
+		else if (res > 0)
 		{
 			/* No remote target is an error */
 			LM_ERR("couldn't find any remote target !\n");
@@ -1105,7 +1126,7 @@ str* get_remote_target(struct sip_msg *msg)
 		}
 
 		uri = &rt->nameaddr.uri;
-		if(get_maddr_uri(uri, 0)!=0) 
+		if(get_maddr_uri(uri, 0)!=0)
 		{
 			LM_ERR("failed to check maddr\n");
 			return 0;

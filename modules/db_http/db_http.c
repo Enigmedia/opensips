@@ -49,7 +49,7 @@ int cap_replace = 0;
 int cap_insert_update = 0;
 int use_ssl = 0 ;
 
-
+unsigned int db_http_timeout = 30000; /* Default is 30 seconds */
 
 
 /*
@@ -73,6 +73,8 @@ static param_export_t params[] = {
 	{"field_delimiter", STR_PARAM | USE_FUNC_PARAM ,set_col_delim},
 	{"row_delimiter", STR_PARAM | USE_FUNC_PARAM ,set_line_delim},
 	{"quote_delimiter", STR_PARAM | USE_FUNC_PARAM ,set_quote_delim},
+	{"value_delimiter", STR_PARAM | USE_FUNC_PARAM ,set_value_delim},
+	{"timeout", INT_PARAM,&db_http_timeout},
 	{0, 0, 0}
 };
 
@@ -145,7 +147,7 @@ int db_http_bind_api( const str* mod, db_func_t *dbb)
 	dbb->insert           = db_http_insert;
 	dbb->delete           = db_http_delete;
 	dbb->update           = db_http_update;
-		
+
 
 	return 0;
 }

@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -68,7 +68,7 @@ struct lb_resource *get_resource_by_name(struct lb_data *data, str *name)
 	struct lb_resource *res;
 
 	for( res=data->resources ; res ; res=res->next ) {
-		if (name->len==res->name.len && 
+		if (name->len==res->name.len &&
 		memcmp( name->s, res->name.s, name->len)==0) {
 			LM_DBG("found resource [%.*s]\n",name->len,name->s);
 			return res;
@@ -130,7 +130,7 @@ static struct lb_resource *add_lb_resource(struct lb_data *data, str *name)
 		}
 		new_res->profile = lb_dlg_binds.search_profile( &profile_name );
 		if (new_res->profile==NULL) {
-			LM_CRIT("bug -  cannot find just added profile\n");
+			LM_CRIT("bug - cannot find just added profile\n");
 			goto error;
 		}
 	} else {
@@ -262,7 +262,7 @@ int add_lb_dsturi( struct lb_data *data, int id, int group, char *uri,
 	memcpy( dst->uri.s , uri, len);
 
 	dst->profile_id.s = dst->uri.s + len;
-	dst->profile_id.len = snprintf(dst->profile_id.s, 
+	dst->profile_id.len = snprintf(dst->profile_id.s,
 		2+2*sizeof(struct lb_dst*), "%X", id);
 
 	dst->id = id;
@@ -509,7 +509,7 @@ int do_load_balance(struct sip_msg *req, int grp, struct lb_res_str_list *rl,
 
 	/* lock the resources */
 	for( i=0 ; i<rl->n ; i++)
-		get_lock( call_res[i]->lock );
+		lock_get( call_res[i]->lock );
 
 	/* do the load-balancing */
 	load = 0;
@@ -550,14 +550,14 @@ int do_load_balance(struct sip_msg *req, int grp, struct lb_res_str_list *rl,
 		/* add to the profiles */
 		for( i=0 ; i<rl->n ; i++) {
 			if (lb_dlg_binds.set_profile( req, &dst->profile_id,
-			call_res[i]->profile)!=0)
+			call_res[i]->profile, 0)!=0)
 				LM_ERR("failed to add to profile\n");
 		}
 	}
 
 	/* unlock the resources*/
 	for( i=0 ; i<rl->n ; i++)
-		release_lock( call_res[i]->lock );
+		lock_release( call_res[i]->lock );
 
 	if (dst) {
 		LM_DBG("winning destination <%.*s> selected for LB set with free=%d\n",
@@ -736,18 +736,18 @@ end_search:
 
 	/* lock the resources */
 	for( i=0 ; i<rl->n ; i++)
-		get_lock( call_res[i]->lock );
+		lock_get( call_res[i]->lock );
 
 	/* add to the profiles */
 	for( i=0 ; i<rl->n ; i++) {
 		if (lb_dlg_binds.set_profile( req, &dst->profile_id,
-		call_res[i]->profile)!=0)
+		call_res[i]->profile, 0)!=0)
 			LM_ERR("failed to add to profile\n");
 	}
 
 	/* unlock the resources*/
 	for( i=0 ; i<rl->n ; i++)
-		release_lock( call_res[i]->lock );
+		lock_release( call_res[i]->lock );
 
 	return 0;
 }

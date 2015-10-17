@@ -1,5 +1,5 @@
-/* 
- * $Id$ 
+/*
+ * $Id$
  *
  * Usrloc contact structure
  *
@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -42,6 +42,7 @@
 #include <time.h>
 #include "../../qvalue.h"
 #include "../../str.h"
+#include "../../proxy.h"
 #include "../../db/db_insertq.h"
 
 
@@ -65,7 +66,7 @@ typedef enum flags {
 
 
 /*! \brief
- * Main structure for handling of registered Contact: data 
+ * Main structure for handling of registered Contact: data
  */
 typedef struct ucontact {
 	str* domain;            /*!< Pointer to domain name (NULL terminated) */
@@ -85,6 +86,9 @@ typedef struct ucontact {
 	struct socket_info *sock; /*!< received socket */
 	time_t last_modified;   /*!< When the record was last modified */
 	unsigned int methods;   /*!< Supported methods */
+	str attr;               /*!< Additional registration info  */
+	struct proxy_l next_hop;/*!< SIP-wise determined next hop */
+
 	struct ucontact* next;  /*!< Next contact in the linked list */
 	struct ucontact* prev;  /*!< Previous contact in the linked list */
 } ucontact_t;
@@ -103,6 +107,7 @@ typedef struct ucontact_info {
 	struct socket_info *sock;
 	unsigned int methods;
 	time_t last_modified;
+	str *attr;
 } ucontact_info_t;
 
 /*! \brief
@@ -207,8 +212,9 @@ struct urecord;
  * Update ucontact with new values
  */
 typedef int (*update_ucontact_t)(struct urecord* _r, ucontact_t* _c,
-		ucontact_info_t* _ci);
+		ucontact_info_t* _ci, char is_replicated);
 
-int update_ucontact(struct urecord* _r, ucontact_t* _c, ucontact_info_t* _ci);
+int update_ucontact(struct urecord* _r, ucontact_t* _c, ucontact_info_t* _ci,
+                    char is_replicated);
 
 #endif /* UCONTACT_H */

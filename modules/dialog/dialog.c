@@ -17,22 +17,22 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
  * --------
  *  2006-04-14 initial version (bogdan)
  *  2006-11-28 Added statistic support for the number of early and failed
- *              dialogs. (Jeffrey Magder - SOMA Networks) 
+ *              dialogs. (Jeffrey Magder - SOMA Networks)
  *  2007-04-30 added dialog matching without DID (dialog ID), but based only
- *              on RFC3261 elements - based on an original patch submitted 
+ *              on RFC3261 elements - based on an original patch submitted
  *              by Michel Bensoussan <michel@extricom.com> (bogdan)
  *  2007-05-15 added saving dialogs' information to database (ancuta)
- *  2007-07-04 added saving dialog cseq, contact, record route 
+ *  2007-07-04 added saving dialog cseq, contact, record route
  *              and bind_addresses(sock_info) for caller and callee (ancuta)
- *  2008-04-14 added new type of callback to be triggered when dialogs are 
+ *  2008-04-14 added new type of callback to be triggered when dialogs are
  *              loaded from DB (bogdan)
  */
 
@@ -55,6 +55,8 @@
 #include "../../mi/mi.h"
 #include "../tm/tm_load.h"
 #include "../rr/api.h"
+#include "../../bin_interface.h"
+
 #include "dlg_hash.h"
 #include "dlg_timer.h"
 #include "dlg_handlers.h"
@@ -65,15 +67,16 @@
 #include "dlg_profile.h"
 #include "dlg_vals.h"
 #include "dlg_tophiding.h"
+#include "dlg_replication.h"
 
 static int mod_init(void);
 static int child_init(int rank);
 static void mod_destroy(void);
 
 /* module parameter */
-static int dlg_hash_size = 4096;
 int log_profile_hash_size = 4;
-static char* rr_param = "did";
+str rr_param = {"did",3};
+static int dlg_hash_size = 4096;
 static str timeout_spec = {NULL, 0};
 static int default_timeout = 60 * 60 * 12;  /* 12 hours */
 static int ping_interval = 30; /* seconds */
@@ -97,10 +100,15 @@ stat_var *processed_dlgs = 0;
 stat_var *expired_dlgs = 0;
 stat_var *failed_dlgs = 0;
 stat_var *early_dlgs  = 0;
+stat_var *create_sent  = 0;
+stat_var *update_sent  = 0;
+stat_var *delete_sent  = 0;
+stat_var *create_recv  = 0;
+stat_var *update_recv  = 0;
+stat_var *delete_recv  = 0;
 
 struct tm_binds d_tmb;
 struct rr_binds d_rrb;
-pv_spec_t timeout_avp;
 
 /* db stuff */
 static str db_url = {NULL,0};
@@ -111,8 +119,14 @@ extern int last_dst_leg;
 /* cachedb stuff */
 str cdb_url = {0,0};
 
+/* dialog replication using the bpi interface */
+int accept_replicated_dlg=0;
+struct replication_dest *replication_dests=NULL;
+
 static int pv_get_dlg_count( struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res);
+
+static int add_replication_dest(modparam_t type, void *val);
 
 /* commands wrappers and fixups */
 static int fixup_profile(void** param, int param_no);
@@ -144,9 +158,13 @@ static int w_tsl_dlg_flag(struct sip_msg *msg, char *_idx, char *_val);
 int pv_get_dlg_lifetime(struct sip_msg *msg,pv_param_t *param,pv_value_t *res);
 int pv_get_dlg_status(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 int pv_get_dlg_flags(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+int pv_get_dlg_timeout(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 int pv_get_dlg_dir(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 int pv_get_dlg_did(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+int pv_get_dlg_end_reason(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 int pv_set_dlg_flags(struct sip_msg *msg, pv_param_t *param, int op,
+		pv_value_t *val);
+int pv_set_dlg_timeout(struct sip_msg *msg, pv_param_t *param, int op,
 		pv_value_t *val);
 
 static cmd_export_t cmds[]={
@@ -201,6 +219,8 @@ static cmd_export_t cmds[]={
 			BRANCH_ROUTE | LOCAL_ROUTE },
 	{"topology_hiding",(cmd_function)w_topology_hiding,0,NULL,
 			0, REQUEST_ROUTE},
+	{"topology_hiding",(cmd_function)w_topology_hiding1,1,fixup_create_dlg2,
+			0, REQUEST_ROUTE},
 	{"match_dialog",  (cmd_function)w_match_dialog,       0,NULL,
 			0, REQUEST_ROUTE},
 	{"load_dlg",  (cmd_function)load_dlg,   0, 0, 0, 0},
@@ -211,8 +231,7 @@ static param_export_t mod_params[]={
 	{ "enable_stats",          INT_PARAM, &dlg_enable_stats         },
 	{ "hash_size",             INT_PARAM, &dlg_hash_size            },
 	{ "log_profile_hash_size", INT_PARAM, &log_profile_hash_size    },
-	{ "rr_param",              STR_PARAM, &rr_param                 },
-	{ "timeout_avp",           STR_PARAM, &timeout_spec.s           },
+	{ "rr_param",              STR_PARAM, &rr_param.s               },
 	{ "default_timeout",       INT_PARAM, &default_timeout          },
 	{ "ping_interval",         INT_PARAM, &ping_interval            },
 	{ "dlg_extra_hdrs",        STR_PARAM, &dlg_extra_hdrs.s         },
@@ -240,6 +259,7 @@ static param_export_t mod_params[]={
 	{ "profiles_column",       STR_PARAM, &profiles_column.s        },
 	{ "vars_column",           STR_PARAM, &vars_column.s            },
 	{ "sflags_column",         STR_PARAM, &sflags_column.s          },
+	{ "flags_column",          STR_PARAM, &flags_column.s           },
 	{ "db_update_period",      INT_PARAM, &db_update_period         },
 	{ "profiles_with_value",   STR_PARAM, &profiles_wv_s            },
 	{ "profiles_no_value",     STR_PARAM, &profiles_nv_s            },
@@ -252,6 +272,10 @@ static param_export_t mod_params[]={
 	{ "profile_no_value_prefix", STR_PARAM, &cdb_noval_prefix.s     },
 	{ "profile_size_prefix",     STR_PARAM, &cdb_size_prefix.s      },
 	{ "profile_timeout",         INT_PARAM, &profile_timeout        },
+	/* dialog replication through UDP binary packets */
+	{ "accept_replicated_dialogs",INT_PARAM, &accept_replicated_dlg },
+	{ "replicate_dialogs_to",     STR_PARAM|USE_FUNC_PARAM,
+								(void *)add_replication_dest        },
 	{ 0,0,0 }
 };
 
@@ -262,6 +286,12 @@ static stat_export_t mod_stats[] = {
 	{"processed_dialogs" ,  0,              &processed_dlgs    },
 	{"expired_dialogs" ,    0,              &expired_dlgs      },
 	{"failed_dialogs",      0,              &failed_dlgs       },
+	{"create_sent",         0,              &create_sent       },
+	{"update_sent",         0,              &update_sent       },
+	{"delete_sent",         0,              &delete_sent       },
+	{"create_recv",         0,              &create_recv       },
+	{"update_recv",         0,              &update_recv       },
+	{"delete_recv",         0,              &delete_recv       },
 	{0,0,0}
 };
 
@@ -271,6 +301,7 @@ static mi_export_t mi_cmds[] = {
 	{ "dlg_list_ctx",       0, mi_print_dlgs_ctx,     0,  0,  0},
 	{ "dlg_end_dlg",        0, mi_terminate_dlg,      0,  0,  0},
 	{ "dlg_db_sync",        0, mi_sync_db_dlg,        0,  0,  0},
+	{ "dlg_restore_db",     0, mi_restore_dlg_db,     0,  0,  0},
 	{ "profile_get_size",   0, mi_get_profile,        0,  0,  0},
 	{ "profile_list_dlgs",  0, mi_profile_list,       0,  0,  0},
 	{ "profile_get_values", 0, mi_get_profile_values, 0,  0,  0},
@@ -294,6 +325,10 @@ static pv_export_t mod_items[] = {
 		pv_set_dlg_val,    pv_parse_name, 0, 0, 0},
 	{ {"DLG_did",     sizeof("DLG_did")-1},      1000, pv_get_dlg_did,
 		0,                 0, 0, 0, 0},
+	{ {"DLG_end_reason",     sizeof("DLG_end_reason")-1},      1000,
+		pv_get_dlg_end_reason,0,0, 0, 0, 0},
+	{ {"DLG_timeout",        sizeof("DLG_timeout")-1},       1000, 
+		pv_get_dlg_timeout, pv_set_dlg_timeout,  0, 0, 0, 0 },
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
@@ -330,7 +365,7 @@ static int fixup_profile(void** param, int param_no)
 	if (param_no==1) {
 		profile = search_dlg_profile( &s );
 		if (profile==NULL) {
-			LM_CRIT("profile <%s> not definited\n",s.s);
+			LM_CRIT("profile <%s> not defined\n",s.s);
 			return E_CFG;
 		}
 		pkg_free(*param);
@@ -544,6 +579,11 @@ int load_dlg( struct dlg_binds *dlgb )
 	dlgb->store_dlg_value = store_dlg_value;
 	dlgb->fetch_dlg_value = fetch_dlg_value;
 	dlgb->terminate_dlg = terminate_dlg;
+
+	dlgb->match_dialog = w_match_dialog;
+	dlgb->fix_route_dialog = fix_route_dialog;
+	dlgb->validate_dialog = dlg_validate_dialog;
+
 	return 1;
 }
 
@@ -555,7 +595,7 @@ static int pv_get_dlg_count(struct sip_msg *msg, pv_param_t *param,
 	int l;
 	char *ch;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	n = active_dlgs ? get_stat_val(active_dlgs) : 0;
@@ -602,6 +642,7 @@ static int mod_init(void)
 	profiles_column.len = strlen(profiles_column.s);
 	vars_column.len = strlen(vars_column.s);
 	sflags_column.len = strlen(sflags_column.s);
+	flags_column.len = strlen(flags_column.s);
 	dialog_table_name.len = strlen(dialog_table_name.s);
 
 	/* param checkings */
@@ -613,21 +654,14 @@ static int mod_init(void)
 		return -1;
 	}
 
-	if (rr_param==0 || rr_param[0]==0) {
+	if (rr_param.s==0 || rr_param.s[0]==0) {
 		LM_ERR("empty rr_param!!\n");
 		return -1;
-	} else if (strlen(rr_param)>MAX_DLG_RR_PARAM_NAME) {
+	}
+	rr_param.len = strlen(rr_param.s);
+	if (rr_param.len>MAX_DLG_RR_PARAM_NAME) {
 		LM_ERR("rr_param too long (max=%d)!!\n", MAX_DLG_RR_PARAM_NAME);
 		return -1;
-	}
-
-	if (timeout_spec.s) {
-		if ( pv_parse_spec(&timeout_spec, &timeout_avp)==0 
-				&& (timeout_avp.type!=PVT_AVP)){
-			LM_ERR("malformed or non AVP timeout "
-				"AVP definition in '%.*s'\n", timeout_spec.len,timeout_spec.s);
-			return -1;
-		}
 	}
 
 	if (default_timeout<=0) {
@@ -710,6 +744,12 @@ static int mod_init(void)
 		return -1;
 	}
 
+	if (accept_replicated_dlg &&
+		bin_register_cb("dialog", receive_binary_packet) < 0) {
+		LM_ERR("Cannot register binary packet callback!\n");
+		return -1;
+	}
+
 	if (dlg_have_own_timer_proc) {
 		LM_INFO("Running with dedicated dialog timer process\n");
 		dlg_own_timer_proc = register_timer_process( "dlg-timer",
@@ -738,8 +778,7 @@ static int mod_init(void)
 	}
 
 	/* init handlers */
-	init_dlg_handlers( rr_param,
-		timeout_spec.s?&timeout_avp:0, default_timeout);
+	init_dlg_handlers(default_timeout);
 
 	/* init timer */
 	if (init_dlg_timer(dlg_ontimeout)!=0) {
@@ -790,9 +829,7 @@ static int mod_init(void)
 		run_load_callbacks();
 	}
 
-	/* if profiles should be kept in cachedb's */
-
-	destroy_dlg_callbacks( DLGCB_LOADED );
+	mark_dlg_loaded_callbacks_run();
 	destroy_cachedb(0);
 
 	return 0;
@@ -865,8 +902,7 @@ static int w_create_dialog2(struct sip_msg *req,char *param)
 {
 	struct cell *t;
 	str res = {0,0};
-	int flags=0;
-	char *p;
+	int flags;
 
 	if (fixup_get_svalue(req, (gparam_p)param, &res) !=0)
 	{
@@ -874,26 +910,7 @@ static int w_create_dialog2(struct sip_msg *req,char *param)
 		return -1;
 	}
 
-	for (p=res.s;p<res.s+res.len;p++)
-	{
-		switch (*p)
-		{
-			case 'P':
-				flags |= DLG_FLAG_PING_CALLER;
-				LM_DBG("will ping caller\n");
-				break;
-			case 'p':
-				flags |= DLG_FLAG_PING_CALLEE;
-				LM_DBG("will ping callee\n");
-				break;
-			case 'B':
-				flags |= DLG_FLAG_BYEONTIMEOUT;
-				LM_DBG("bye on timeout activated\n");
-				break;
-			default:
-				LM_DBG("unknown create_dialog flag : [%c] . Skipping\n",*p);
-		}
-	}
+	flags = parse_create_dlg_flags(res);
 
 	/* is the dialog already created? */
 	if (current_dlg_pointer!=NULL)
@@ -914,7 +931,7 @@ static int w_create_dialog2(struct sip_msg *req,char *param)
 
 static int w_match_dialog(struct sip_msg *msg)
 {
-	int backup,i,rr_param_len;
+	int backup,i;
 	void *match_param = NULL;
 	struct sip_uri *r_uri;
 
@@ -927,7 +944,7 @@ static int w_match_dialog(struct sip_msg *msg)
 	backup = seq_match_mode;
 	seq_match_mode = SEQ_MATCH_FALLBACK;
 
-	/* See if we can force DID matching, for the case of topo 
+	/* See if we can force DID matching, for the case of topo
 	 * hiding, where we have the DID as param of the contact */
 	if (parse_sip_msg_uri(msg)<0) {
 		LM_ERR("Failed to parse request URI\n");
@@ -940,15 +957,14 @@ static int w_match_dialog(struct sip_msg *msg)
 	}
 
 	r_uri = &msg->parsed_uri;
-	rr_param_len = strlen(rr_param);
 
 	if (check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0) == 1 &&
 		msg->route == NULL) {
 		/* Seems we are in the topo hiding case :
 		 * we are in the R-URI and there are no other route headers */
 		for (i=0;i<r_uri->u_params_no;i++)
-			if (r_uri->u_name[i].len == rr_param_len &&
-				memcmp(rr_param,r_uri->u_name[i].s,rr_param_len)==0) {
+			if (r_uri->u_name[i].len == rr_param.len &&
+				memcmp(rr_param.s,r_uri->u_name[i].s,rr_param.len)==0) {
 				LM_DBG("We found DID param in R-URI with value of %.*s \n",
 					r_uri->u_val[i].len,r_uri->u_val[i].s);
 				/* pass the param value to the matching funcs */
@@ -1009,19 +1025,19 @@ static int w_set_dlg_profile(struct sip_msg *msg, char *profile, char *value)
 	pve = (pv_elem_t *)value;
 
 	if (((struct dlg_profile_table*)profile)->has_value) {
-		if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 || 
+		if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 ||
 		val_s.len == 0 || val_s.s == NULL) {
 			LM_WARN("cannot get string for value\n");
 			return -1;
 		}
 		if ( set_dlg_profile( msg, &val_s,
-		(struct dlg_profile_table*)profile) < 0 ) {
+		(struct dlg_profile_table*)profile, 0) < 0 ) {
 			LM_ERR("failed to set profile\n");
 			return -1;
 		}
 	} else {
 		if ( set_dlg_profile( msg, NULL,
-		(struct dlg_profile_table*)profile) < 0 ) {
+		(struct dlg_profile_table*)profile, 0) < 0 ) {
 			LM_ERR("failed to set profile\n");
 			return -1;
 		}
@@ -1038,7 +1054,7 @@ static int w_unset_dlg_profile(struct sip_msg *msg, char *profile, char *value)
 	pve = (pv_elem_t *)value;
 
 	if (((struct dlg_profile_table*)profile)->has_value) {
-		if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 || 
+		if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 ||
 		val_s.len == 0 || val_s.s == NULL) {
 			LM_WARN("cannot get string for value\n");
 			return -1;
@@ -1067,7 +1083,7 @@ static int w_is_in_profile(struct sip_msg *msg, char *profile, char *value)
 	pve = (pv_elem_t *)value;
 
 	if ( pve!=NULL && ((struct dlg_profile_table*)profile)->has_value) {
-		if ( pv_printf_s(msg, pve, &val_s)!=0 || 
+		if ( pv_printf_s(msg, pve, &val_s)!=0 ||
 		val_s.len == 0 || val_s.s == NULL) {
 			LM_WARN("cannot get string for value\n");
 			return -1;
@@ -1081,7 +1097,7 @@ static int w_is_in_profile(struct sip_msg *msg, char *profile, char *value)
 }
 
 
-static int w_get_profile_size(struct sip_msg *msg, char *profile, 
+static int w_get_profile_size(struct sip_msg *msg, char *profile,
 													char *value, char *result)
 {
 	pv_elem_t *pve;
@@ -1097,7 +1113,7 @@ static int w_get_profile_size(struct sip_msg *msg, char *profile,
 	sp_dest = (pv_spec_t *)result;
 
 	if ( pve!=NULL && ((struct dlg_profile_table*)profile)->has_value) {
-		if ( pv_printf_s(msg, pve, &val_s)!=0 || 
+		if ( pv_printf_s(msg, pve, &val_s)!=0 ||
 		val_s.len == 0 || val_s.s == NULL) {
 			LM_WARN("cannot get string for value\n");
 			return -1;
@@ -1199,7 +1215,7 @@ int w_store_dlg_value(struct sip_msg *msg, char *name, char *val)
 	if ( (dlg=get_current_dialog())==NULL )
 		return -1;
 
-	if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 || 
+	if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 ||
 	val_s.len == 0 || val_s.s == NULL) {
 		LM_WARN("cannot get string for value\n");
 		return -1;
@@ -1277,7 +1293,7 @@ static int w_get_dlg_info(struct sip_msg *msg, char *attr, char *attr_val,
 	str val_s;
 	int n;
 
-	if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 || 
+	if ( pve==NULL || pv_printf_s(msg, pve, &val_s)!=0 ||
 	val_s.len == 0 || val_s.s == NULL) {
 		LM_WARN("cannot get string for value\n");
 		return -1;
@@ -1317,7 +1333,7 @@ int pv_get_dlg_lifetime(struct sip_msg *msg, pv_param_t *param,
 	char *ch = NULL;
 	struct dlg_cell *dlg;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	if ( (dlg=get_current_dialog())==NULL )
@@ -1342,7 +1358,7 @@ int pv_get_dlg_status(struct sip_msg *msg, pv_param_t *param,
 	char *ch = NULL;
 	struct dlg_cell *dlg;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	if ( (dlg=get_current_dialog())==NULL )
@@ -1367,7 +1383,7 @@ int pv_get_dlg_flags(struct sip_msg *msg, pv_param_t *param,
 	char *ch = NULL;
 	struct dlg_cell *dlg;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	if ( (dlg=get_current_dialog())==NULL )
@@ -1385,12 +1401,48 @@ int pv_get_dlg_flags(struct sip_msg *msg, pv_param_t *param,
 }
 
 
+int pv_get_dlg_timeout(struct sip_msg *msg, pv_param_t *param,
+		pv_value_t *res)
+{
+	int l = 0;
+	char *ch = NULL;
+	struct dlg_cell *dlg;
+
+	if(res==NULL)
+		return -1;
+
+	if ( (dlg=get_current_dialog())!=NULL ) {
+
+		dlg_lock_dlg(dlg);
+		if (dlg->state < DLG_STATE_CONFIRMED_NA)
+			l = dlg->lifetime;
+		else
+			l = dlg->tl.timeout - get_ticks();
+		dlg_unlock_dlg(dlg);
+
+	} else if (msg->id == dlg_tmp_timeout_id && dlg_tmp_timeout != -1) {
+		l = dlg_tmp_timeout;
+	} else {
+		return pv_get_null( msg, param, res);
+	}
+
+	res->ri = l;
+
+	ch = int2str( (unsigned long)res->ri, &l);
+	res->rs.s = ch;
+	res->rs.len = l;
+
+	res->flags = PV_VAL_STR|PV_VAL_INT|PV_TYPE_INT;
+
+	return 0;
+}
+
 int pv_get_dlg_dir(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
 	struct dlg_cell *dlg;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	if ( (dlg=get_current_dialog())==NULL || last_dst_leg<0)
@@ -1417,7 +1469,7 @@ int pv_get_dlg_did(struct sip_msg *msg, pv_param_t *param,
 	struct dlg_cell *dlg;
 	str aux;
 
-	if(msg==NULL || res==NULL)
+	if(res==NULL)
 		return -1;
 
 	if ( (dlg=get_current_dialog())==NULL )
@@ -1449,6 +1501,23 @@ int pv_get_dlg_did(struct sip_msg *msg, pv_param_t *param,
 	return 0;
 }
 
+int pv_get_dlg_end_reason(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
+{
+	struct dlg_cell *dlg;
+
+	if(res==NULL)
+		return -1;
+
+	if ( (dlg=get_current_dialog())==NULL || dlg->terminate_reason.s == NULL) {
+		return pv_get_null( msg, param, res);
+	}
+
+	res->rs = dlg->terminate_reason;
+	res->flags = PV_VAL_STR;
+
+	return 0;
+}
+
 int pv_set_dlg_flags(struct sip_msg *msg, pv_param_t *param,
 		int op, pv_value_t *val)
 {
@@ -1471,3 +1540,109 @@ int pv_set_dlg_flags(struct sip_msg *msg, pv_param_t *param,
 
 	return 0;
 }
+
+int pv_set_dlg_timeout(struct sip_msg *msg, pv_param_t *param,
+		int op, pv_value_t *val)
+{
+	struct dlg_cell *dlg;
+	int timeout, db_update = 0, timer_update = 0;
+
+	if (val==NULL || val->flags & PV_VAL_NULL) {
+		LM_ERR("cannot assign dialog timeout to NULL\n");
+		return -1;
+	}
+
+	if (!(val->flags&PV_VAL_INT)){
+		/* try parsing the string */
+		if (str2sint(&val->rs, &timeout) < 0) {
+			LM_ERR("assigning non-int value to dialog flags\n");
+			return -1;
+		}
+	} else {
+		timeout = val->ri;
+	}
+
+	if (timeout < 0) {
+		LM_ERR("cannot set a negative timeout\n");
+		return -1;
+	}
+	if ((dlg = get_current_dialog()) != NULL) {
+		dlg_lock_dlg(dlg);
+		dlg->lifetime = timeout;
+		/* update now only if realtime and the dialog is confirmed */
+		if (dlg->state >= DLG_STATE_CONFIRMED && dlg_db_mode == DB_MODE_REALTIME)
+			db_update = 1;
+		else
+			dlg->flags |= DLG_FLAG_CHANGED;
+
+		if (dlg->state == DLG_STATE_CONFIRMED_NA || 
+		dlg->state == DLG_STATE_CONFIRMED)
+			timer_update = 1;
+
+		dlg_unlock_dlg(dlg);
+
+		if (db_update)
+			update_dialog_timeout_info(dlg);
+
+		if (replication_dests)
+			replicate_dialog_updated(dlg);
+
+		/* make sure we don't update it again later */
+		dlg_tmp_timeout = -1;
+		dlg_tmp_timeout_id = -1;
+
+		if (timer_update && update_dlg_timer(&dlg->tl, timeout) < 0) {
+			LM_ERR("failed to update timer\n");
+			return -1;
+		}
+	} else {
+		/* store it until we match the dialog */
+		dlg_tmp_timeout = timeout;
+		dlg_tmp_timeout_id = msg->id;
+	}
+
+	return 0;
+}
+
+static int add_replication_dest(modparam_t type, void *val)
+{
+	struct replication_dest *rd;
+	char *host;
+	int hlen, port;
+	int proto;
+	struct hostent *he;
+	str st;
+
+	rd = pkg_malloc(sizeof(*rd));
+	memset(rd, 0, sizeof(*rd));
+
+	if (parse_phostport(val, strlen(val), &host, &hlen, &port, &proto) < 0) {
+		LM_ERR("Bad replication destination IP!\n");
+		return -1;
+	}
+
+	if (proto == PROTO_NONE)
+		proto = PROTO_UDP;
+
+	if (proto != PROTO_UDP) {
+		LM_ERR("Dialog replication only supports UDP packets!\n");
+		return -1;
+	}
+
+	st.s = host;
+	st.len = hlen;
+	he = sip_resolvehost(&st, (unsigned short *)&port,
+							  (unsigned short *)&proto, 0, 0);
+	if (!he) {
+		LM_ERR("Cannot resolve host: %.*s\n", hlen, host);
+		return -1;
+	}
+
+	hostent2su(&rd->to, he, 0, port);
+
+	rd->next = replication_dests;
+	replication_dests = rd;
+
+	return 1;
+}
+

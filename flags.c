@@ -16,8 +16,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -41,6 +41,9 @@
 
 /* several lists of maximum MAX_FLAG flags */
 struct flag_entry *flag_lists[FLAG_LIST_COUNT];
+
+/* buffer used to offer string representations of flag bitmasks */
+static char print_buffer[PRINT_BUFFER_SIZE];
 
 /*********************** msg flags ****************************/
 
@@ -80,6 +83,64 @@ int flag_idx2mask(int *flag)
 	return 0;
 }
 
+str bitmask_to_flag_list(enum flag_type type, int bitmask)
+{
+	struct flag_entry *entry;
+	str ret;
+
+	ret.s   = print_buffer;
+	ret.len = 0;
+	for (entry = flag_lists[type]; entry; entry = entry->next) {
+
+		if (bitmask & (1 << entry->bit)) {
+			memcpy(ret.s + ret.len, entry->name.s, entry->name.len);
+			ret.len += entry->name.len;
+
+			ret.s[ret.len++] = FLAG_DELIM;
+		}
+	}
+
+	if (ret.len > 0)
+		ret.len--;
+
+	return ret;
+}
+
+int flag_list_to_bitmask(str *flags, enum flag_type type, char delim)
+{
+	char *p, *lim;
+	char *crt_flag;
+	str name;
+	struct flag_entry *e;
+	int ret = 0;
+
+	if (flags->len < 0)
+		return 0;
+
+	lim = flags->s + flags->len;
+	crt_flag = flags->s;
+	for (p = flags->s; p <= lim; p++) {
+
+		if (p == lim || *p == delim) {
+
+			name.s   = crt_flag;
+			name.len = p - crt_flag;
+			for (e = flag_lists[type]; e; e = e->next) {
+				if (e->name.len == p - crt_flag &&
+				    str_strcmp(&e->name, &name) == 0) {
+
+					ret |= 1 << e->bit;
+					break;
+				}
+			}
+
+			crt_flag = p + 1;
+		}
+	}
+
+	return ret;
+}
+
 /**
  * The function MUST be called only in the pre-forking phases of OpenSIPS
  * (mod_init() or in function fixups)
@@ -94,13 +155,18 @@ int get_flag_id_by_name(int flag_type, char *flag_name)
 		return -1;
 	}
 
+	fn.s = flag_name;
+	fn.len = strlen(flag_name);
+
+	if (fn.len == 0) {
+		LM_WARN("found empty string flag modparam! possible scripting error?\n");
+		return -1;
+	}
+
 	if (flag_type < 0 || flag_type > FLAG_LIST_COUNT) {
 		LM_ERR("Invalid flag list: %d\n", flag_type);
 		return -2;
 	}
-
-	fn.s = flag_name;
-	fn.len = strlen(flag_name);
 
 	flag_list = flag_lists + flag_type;
 
@@ -131,6 +197,7 @@ int get_flag_id_by_name(int flag_type, char *flag_name)
 	it->next = *flag_list;
 	*flag_list = it;
 
+	LM_DBG("New flag: [ %.*s : %d ][%d]\n", fn.len, fn.s, it->bit, flag_type);
 	return it->bit;
 }
 

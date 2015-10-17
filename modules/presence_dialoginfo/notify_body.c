@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * presence_dialoginfo module -  
+ * presence_dialoginfo module -
  *
  * Copyright (C) 2006 Voice Sistem S.R.L.
  * Copyright (C) 2008 Klaus Darilion, IPCom
@@ -43,9 +43,11 @@
 #include "notify_body.h"
 #include "pidf.h"
 
-str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n);
+str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n, int partial);
 str* build_dialoginfo(str* pres_user, str* pres_domain);
 extern int force_single_dialog;
+
+static str* _build_empty_dialoginfo(const char* pres_uri_char, str* extra_hdrs);
 
 #define VERSION_HOLDER "00000000000"
 
@@ -55,18 +57,39 @@ void free_xml_body(char* body)
 		xmlFree(body);
 }
 
+/* Joins user and domain into "sip:USER@DOMAIN".
+ * dst must fit at least MAX_URI_SIZE+1 characters! */
+static inline int sipuri_cat(char* dst, const str* user, const str* domain) {
+	if ((4 + user->len + 1 + domain->len) > MAX_URI_SIZE) {
+	        LM_ERR("entity URI too long, maximum=%d\n", MAX_URI_SIZE);
+		return -1;
+	}
+	memcpy(dst, "sip:", 4);
+	memcpy(dst + 4, user->s, user->len);
+	dst[user->len + 4] = '@';
+	memcpy(dst + user->len + 5, domain->s, domain->len);
+	dst[user->len + 5 + domain->len] = '\0';
+	return 0;
+}
 
 str* dlginfo_agg_nbody(str* pres_user, str* pres_domain, str** body_array, int n, int off_index)
 {
 	str* n_body= NULL;
+	char pres_uri_char[MAX_URI_SIZE+1];
 
-	LM_DBG("[pres_user]=%.*s [pres_domain]= %.*s, [n]=%d\n",
-			pres_user->len, pres_user->s, pres_domain->len, pres_domain->s, n);
+	if (sipuri_cat(pres_uri_char, pres_user, pres_domain) != 0)
+		return NULL;
+	LM_DBG("[pres_uri] %s (%d), [n]=%d\n", pres_uri_char,
+		pres_user->len + 5 + pres_domain->len, n);
 
-	if(body_array== NULL)
-		return build_dialoginfo(pres_user, pres_domain);
+	if(body_array == NULL)
+		return _build_empty_dialoginfo(pres_uri_char, NULL);
 
-	n_body= agregate_xmls(pres_user, pres_domain, body_array, n);
+	if (n == -2)
+		n_body= agregate_xmls(pres_user, pres_domain, body_array, 1, 1);
+	else
+		n_body= agregate_xmls(pres_user, pres_domain, body_array, n, 0);
+
 	LM_DBG("[n_body]=%p\n", n_body);
 	if(n_body) {
 		LM_DBG("[*n_body]=%.*s\n",
@@ -78,14 +101,14 @@ str* dlginfo_agg_nbody(str* pres_user, str* pres_domain, str** body_array, int n
 	}
 
 	xmlCleanupParser();
-    xmlMemoryDump();
+	xmlMemoryDump();
 
 	if (n_body== NULL)
-		n_body= build_dialoginfo(pres_user, pres_domain);
+		n_body = _build_empty_dialoginfo(pres_uri_char, NULL);
 	return n_body;
 }
 
-str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
+str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n, int partial)
 {
 	int i, j= 0;
 
@@ -100,7 +123,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 	int winner_priority = -1, priority ;
 	xmlNodePtr winner_dialog_node = NULL ;
 	str *body= NULL;
-    char buf[MAX_URI_SIZE+1];
+	char buf[MAX_URI_SIZE+1];
 
 	LM_DBG("[pres_user]=%.*s [pres_domain]= %.*s, [n]=%d\n",
 			pres_user->len, pres_user->s, pres_domain->len, pres_domain->s, n);
@@ -121,7 +144,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 
 		xml_array[j] = NULL;
 		xml_array[j] = xmlParseMemory( body_array[i]->s, body_array[i]->len );
-		
+
 		/* LM_DBG("parsing XML body: [n]=%d, [i]=%d, [j]=%d xml_array[j]=%p\n", n, i, j, xml_array[j] ); */
 
 		if( xml_array[j]== NULL)
@@ -131,7 +154,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 		}
 		j++;
 
-	} 
+	}
 
 	if(j== 0)  /* no body */
 	{
@@ -146,14 +169,8 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 	/* LM_DBG("number of bodies in total [n]=%d, number of useful bodies [j]=%d\n", n, j ); */
 
 	/* create the new NOTIFY body  */
-    if ( (pres_user->len + pres_domain->len + 1) > MAX_URI_SIZE) {
-        LM_ERR("entity URI too long, maximum=%d\n", MAX_URI_SIZE);
-        return NULL;
-    }
-    memcpy(buf, pres_user->s, pres_user->len);
-    buf[pres_user->len] = '@';
-    memcpy(buf + pres_user->len + 1, pres_domain->s, pres_domain->len);
-    buf[pres_user->len + 1 + pres_domain->len]= '\0';
+	if (sipuri_cat(buf, pres_user, pres_domain) != 0)
+		goto error;
 
     doc = xmlNewDoc(BAD_CAST "1.0");
     if(doc==0)
@@ -171,7 +188,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 	xmlSetNs(root_node, namespace);
 	/* The version must be increased for each new document and is a 32bit int.
        As the version is different for each watcher, we can not set here the
-       correct value. Thus, we just put here a placeholder which will be 
+       correct value. Thus, we just put here a placeholder which will be
 	   replaced by the correct value in the aux_body_processing callback.
 	   Thus we have CPU intensive XML aggregation only once and can use
 	   quick search&replace in the per-watcher aux_body_processing callback.
@@ -180,8 +197,11 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 	   signed int) has max. 10 characters + 1 character for the sign
 	*/
     xmlNewProp(root_node, BAD_CAST "version", BAD_CAST VERSION_HOLDER);
-    xmlNewProp(root_node, BAD_CAST "state",  BAD_CAST "partial" );
     xmlNewProp(root_node, BAD_CAST "entity",  BAD_CAST buf);
+	if (!partial)
+		xmlNewProp(root_node, BAD_CAST "state",  BAD_CAST "full" );
+	else
+		xmlNewProp(root_node, BAD_CAST "state",  BAD_CAST "partial" );
 
 	/* loop over all bodies and create the aggregated body */
 	for(i=0; i<j; i++)
@@ -198,8 +218,8 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 					LM_DBG("node type: Element, name: %s\n", node->name);
 					/* we do not copy the node, but unlink it and then add it ot the new node
 					 * this destroys the original document but we do not need it anyway.
-					 * using "copy" instead of "unlink" would also copy the namespace which 
-					 * would then be declared redundant (libxml unfortunately can not remove 
+					 * using "copy" instead of "unlink" would also copy the namespace which
+					 * would then be declared redundant (libxml unfortunately can not remove
 					 * namespaces)
 					 */
 					if (!force_single_dialog || (j==1)) {
@@ -242,7 +262,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 		ERR_MEM(PKG_MEM_STR);
 	}
 
-	xmlDocDumpMemory(doc,(xmlChar**)(void*)&body->s, 
+	xmlDocDumpMemory(doc,(xmlChar**)(void*)&body->s,
 			&body->len);
 
   	for(i=0; i<j; i++)
@@ -254,7 +274,7 @@ str* agregate_xmls(str* pres_user, str* pres_domain, str** body_array, int n)
 		xmlFreeDoc(doc);
 	if(xml_array!=NULL)
 		pkg_free(xml_array);
-    
+
 	xmlCleanupParser();
     xmlMemoryDump();
 
@@ -339,37 +359,21 @@ str* build_dialoginfo(str* pres_user, str* pres_domain)
 	xmlNodePtr state_node = NULL;
 
 	str *body= NULL;
-	str *pres_uri= NULL;
+	str pres_uri;
 	char buf[MAX_URI_SIZE+1];
 
-	if ( (pres_user->len + pres_domain->len + 1) > MAX_URI_SIZE) {
-		LM_ERR("entity URI too long, maximum=%d\n", MAX_URI_SIZE);
+	if (sipuri_cat(buf, pres_user, pres_domain) != 0)
 		return NULL;
-	}
-	memcpy(buf, "sip:", 4);
-	memcpy(buf+4, pres_user->s, pres_user->len);
-	buf[pres_user->len+4] = '@';
-	memcpy(buf + pres_user->len + 5, pres_domain->s, pres_domain->len);
-	buf[pres_user->len + 5 + pres_domain->len]= '\0';
+	pres_uri.s = buf;
+	pres_uri.len = 4 + pres_user->len + 1 + pres_domain->len;
+	LM_DBG("[pres_uri] %.*s\n", pres_uri.len, pres_uri.s);
 
-	pres_uri = (str*)pkg_malloc(sizeof(str));
-	if(pres_uri == NULL)
-	{
-		LM_ERR("while allocating memory\n");
-		return NULL;
-	}
-	memset(pres_uri, 0, sizeof(str));
-	pres_uri->s = buf;
-	pres_uri->len = pres_user->len + 5 + pres_domain->len;
-
-	LM_DBG("[pres_uri] %.*s\n", pres_uri->len, pres_uri->s);
-
-	if ( pres_contains_presence(pres_uri)<0 ) {
+	if (pres_contains_presence(&pres_uri) < 0) {
 		LM_DBG("No record exists in hash_table\n");
 		goto error;
 	}
 
-	/* create the Publish body  */
+	/* create the Publish body */
 	doc = xmlNewDoc(BAD_CAST "1.0");
 	if(doc==0)
 		goto error;
@@ -394,8 +398,10 @@ str* build_dialoginfo(str* pres_user, str* pres_domain)
 		LM_ERR("while adding child [dialog]\n");
 		goto error;
 	}
+
+	/* reuse buf for user-part only */
 	memcpy(buf, pres_user->s, pres_user->len);
-	buf[pres_user->len]= '\0';
+	buf[pres_user->len] = '\0';
 
 	xmlNewProp(dialog_node, BAD_CAST "id", BAD_CAST buf);
 
@@ -423,10 +429,6 @@ str* build_dialoginfo(str* pres_user, str* pres_domain)
 	xmlCleanupParser();
 	return body;
 error:
-	if ( pres_uri )
-	{
-		pkg_free(pres_uri);
-	}
 	if(body)
 	{
 		if(body->s)
@@ -438,12 +440,11 @@ error:
 	return NULL;
 }
 
-str* build_empty_dialoginfo(str* pres_uri, str* extra_hdrs)
+static str* _build_empty_dialoginfo(const char* pres_uri_char, str* extra_hdrs)
 {
 	str* nbody= 0;
 	xmlDocPtr doc = NULL;
 	xmlNodePtr node;
-	char* pres_uri_char = NULL;
 
 	nbody= (str*) pkg_malloc(sizeof(str));
 	if(nbody== NULL)
@@ -471,16 +472,7 @@ str* build_empty_dialoginfo(str* pres_uri, str* extra_hdrs)
 	xmlNewProp(node, BAD_CAST "version", BAD_CAST VERSION_HOLDER);
 	xmlNewProp(node, BAD_CAST "state",   BAD_CAST "full");
 
-	pres_uri_char = (char*)pkg_malloc(pres_uri->len + 1);
-	if(pres_uri_char == NULL)
-	{
-		LM_ERR("No more memory\n");
-		goto error;
-	}
-	memcpy(pres_uri_char, pres_uri->s, pres_uri->len);
-	pres_uri_char[pres_uri->len] = '\0';
 	xmlNewProp(node, BAD_CAST "entity", BAD_CAST pres_uri_char);
-	pkg_free(pres_uri_char);
 
 	xmlDocDumpMemory(doc,(xmlChar**)(void*)&nbody->s,
 		&nbody->len);
@@ -498,3 +490,24 @@ error:
 	return 0;
 }
 
+str* build_empty_dialoginfo(str* pres_uri, str* extra_hdrs)
+{
+	char* pres_uri_char;
+	str* ret;
+
+	pres_uri_char = (char*)pkg_malloc(pres_uri->len + 1);
+	if(pres_uri_char == NULL)
+	{
+		LM_ERR("No more memory\n");
+		return NULL;
+	}
+	memcpy(pres_uri_char, pres_uri->s, pres_uri->len);
+	pres_uri_char[pres_uri->len] = '\0';
+
+	/* do the call with a null-terminated pres_uri */
+	ret = _build_empty_dialoginfo(pres_uri_char, extra_hdrs);
+	
+	pkg_free(pres_uri_char);
+
+	return ret;
+}

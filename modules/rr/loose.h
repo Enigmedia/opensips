@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -47,7 +47,7 @@ extern int routing_type;
 /*! \brief
  * Do loose routing as per RFC3261
  */
-int loose_route(struct sip_msg* _m, char* _s1, char* _s2);
+int loose_route(struct sip_msg* _m);
 
 
 /*! \brief
@@ -144,7 +144,7 @@ static inline int is_strict(str* _params)
 			default:              break;
 			}
 			break;
-			
+
 		case 5:
 			switch(s.s[i]) {
 			case '\\': state = 6; break;
@@ -156,7 +156,7 @@ static inline int is_strict(str* _params)
 		case 6: state = 5; break;
 		}
 	}
-	
+
 	if ((state == 2) || (state == 3)) return 0;
 	else return 1;
 }

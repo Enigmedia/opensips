@@ -53,6 +53,7 @@ int mongo_slave_ok=0;      /* not ok to send read requests to secondaries */
 str mongo_write_concern_str = {0,0};
 bson mongo_write_concern_b;
 mongo_write_concern mwc;
+int mongo_exec_threshold=0;
 
 int set_connection(unsigned int type, void *val)
 {
@@ -64,6 +65,7 @@ static param_export_t params[]={
 	{ "op_timeout",    INT_PARAM, &mongo_op_timeout},
 	{ "slave_ok",      INT_PARAM, &mongo_slave_ok},
 	{ "write_concern", STR_PARAM, &mongo_write_concern_str },
+	{ "exec_treshold", INT_PARAM, &mongo_exec_threshold },
 	{0,0,0}
 };
 
@@ -94,6 +96,7 @@ static int mod_init(void)
 	cachedb_engine cde;
 
 	LM_NOTICE("initializing module cachedb_mongodb ...\n");
+	memset(&cde,0,sizeof(cachedb_engine));
 
 	cde.name = cache_mod_name;
 
@@ -106,8 +109,13 @@ static int mod_init(void)
 	cde.cdb_func.add = mongo_con_add;
 	cde.cdb_func.sub = mongo_con_sub;
 	cde.cdb_func.raw_query = mongo_con_raw_query;
+	cde.cdb_func.db_query_trans = mongo_db_query_trans;
+	cde.cdb_func.db_free_trans = mongo_db_free_result_trans;
+	cde.cdb_func.db_insert_trans = mongo_db_insert_trans;
+	cde.cdb_func.db_delete_trans = mongo_db_delete_trans;
+	cde.cdb_func.db_update_trans = mongo_db_update_trans;
 
-	cde.cdb_func.capability = 0; 
+	cde.cdb_func.capability = 0;
 
 	if (mongo_write_concern_str.s != NULL) {
 		/* TODO - try manually building the getlasterror bson */

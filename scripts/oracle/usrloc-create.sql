@@ -1,4 +1,4 @@
-INSERT INTO version (table_name, table_version) values ('location','1007');
+INSERT INTO version (table_name, table_version) values ('location','1009');
 CREATE TABLE location (
     id NUMBER(10) PRIMARY KEY,
     username VARCHAR2(64) DEFAULT '',
@@ -12,11 +12,12 @@ CREATE TABLE location (
     cseq NUMBER(10) DEFAULT 13 NOT NULL,
     last_modified DATE DEFAULT to_date('1900-01-01 00:00:01','yyyy-mm-dd hh24:mi:ss'),
     flags NUMBER(10) DEFAULT 0 NOT NULL,
-    cflags NUMBER(10) DEFAULT 0 NOT NULL,
+    cflags VARCHAR2(255) DEFAULT NULL,
     user_agent VARCHAR2(255) DEFAULT '',
     socket VARCHAR2(64) DEFAULT NULL,
     methods NUMBER(10) DEFAULT NULL,
     sip_instance VARCHAR2(255) DEFAULT NULL,
+    attr VARCHAR2(255) DEFAULT NULL,
     CONSTRAINT location_account_contact_idx  UNIQUE (username, domain, contact, callid)
 );
 

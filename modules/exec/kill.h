@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -42,6 +42,15 @@ extern unsigned int time_to_kill;
 void destroy_kill();
 int initialize_kill();
 int schedule_to_kill( int pid );
+
+/**
+ * __popen - a wrapper function over execvp
+ *
+ * @cmd:    the command string to be executed
+ * @type:   denotes a read-only or write-only stream
+ * @stream: stream to be returned to the caller
+ */
+pid_t __popen(const char *cmd, const char *type, FILE **stream);
 
 
 #endif

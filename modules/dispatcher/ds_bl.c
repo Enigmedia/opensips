@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History
@@ -34,7 +34,6 @@
 #include "../../trim.h"
 #include "../../ip_addr.h"
 
-#include "dispatch.h"
 #include "ds_bl.h"
 
 static struct ds_bl *dsbl_lists = NULL;
@@ -158,7 +157,7 @@ void destroy_ds_bls(void)
 }
 
 
-int populate_ds_bls(void)
+int populate_ds_bls( ds_set_t *sets)
 {
 	unsigned int i,k;
 	struct ds_bl *dsbl;
@@ -176,7 +175,7 @@ int populate_ds_bls(void)
 		/* each blacklisted set at a time */
 		for (i = 0; i < dsbl->no_sets; i++) {
 			/* search if any set matches the one above */
-			for(set = ds_lists[*crt_idx]; set ;set = set->next) {
+			for( set=sets ; set ; set = set->next) {
 				if (set->id == dsbl->sets[i]) {
 					LM_DBG("Set [%d] matches. Adding all destinations:\n", set->id);
 					for (dst = set->dlist; dst; dst = dst->next) {

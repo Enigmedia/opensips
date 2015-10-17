@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * TODO (by bogdan)
@@ -46,7 +46,7 @@
  *     7        avpops module     avp was loaded from DB
  *
  */
- 
+
 
 #include "str.h"
 
@@ -85,6 +85,7 @@ int init_global_avps();
 int init_extra_avps();
 
 struct usr_avp* new_avp(unsigned short flags, int name, int_str val);
+struct usr_avp *clone_avp_list(struct usr_avp *old);
 
 /* add functions */
 int add_avp( unsigned short flags, int id, int_str val);

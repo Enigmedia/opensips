@@ -39,6 +39,8 @@
 # user name column
 # USERCOL="username"
 
+## for testing / development
+#ETCDIR=etc/
 
 # SQL definitions
 # If you change this definitions here, then you must change them 
@@ -58,6 +60,9 @@
 
 # awk tool
 # AWK="awk"
+
+# gdb tool
+# GDB="gdb"
 
 # grep tool
 # GREP="grep"
@@ -88,7 +93,8 @@
 #                   dispatcher dialplan drouting nathelper load_balancer"
 
 # opensips extra modules
-# EXTRA_MODULES="imc cpl siptrace domainpolicy carrierroute userblacklist b2b registrant"
+# EXTRA_MODULES="imc cpl siptrace domainpolicy carrierroute userblacklist 
+#                 b2b registrant call_center"
 
 
 ## type of aliases used: DB - database aliases; UL - usrloc aliases

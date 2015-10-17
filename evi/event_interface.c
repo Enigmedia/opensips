@@ -65,7 +65,7 @@ event_id_t evi_publish_event(str event_name)
 		}
 	} else if (events_no == max_alloc_events) {
 		max_alloc_events *= 2;
-		events = shm_realloc(events, max_alloc_events);
+		events = shm_realloc(events, max_alloc_events * sizeof(evi_event_t));
 		if (!events) {
 			LM_ERR("no more shm memory to hold %d events\n", max_alloc_events);
 			return EVI_ERROR;
@@ -110,13 +110,13 @@ int evi_raise_event(event_id_t id, evi_params_t* params)
 		return -1;
 	}
 	memset(req, 0, sizeof(struct sip_msg));
-	
+
 	req->first_line.type = SIP_REQUEST;
 	req->first_line.u.request.method.s= "DUMMY";
 	req->first_line.u.request.method.len= 5;
 	req->first_line.u.request.uri.s= "sip:user@domain.com";
 	req->first_line.u.request.uri.len= 19;
-	
+
 	bak_avps = set_avp_list(&event_avps);
 
 	status = evi_raise_event_msg(req, id, params);
@@ -486,6 +486,8 @@ struct mi_root * mi_events_list(struct mi_root *cmd_tree, void *param)
 	if (rpl_tree==0)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
+
 	for (i = 0; i < events_no; i++) {
 		node = add_mi_node_child(rpl, 0, "Event", 5,
 				events[i].name.s, events[i].name.len);
@@ -564,7 +566,8 @@ static int evi_print_event(struct evi_mi_param *param,
 	if (!subs && !ev->subscribers)
 		return 0;
 
-	node = add_mi_node_child(rpl, 0, "Event", 5, ev->name.s, ev->name.len);
+	node = add_mi_node_child(rpl, MI_IS_ARRAY, "Event", 5,
+		ev->name.s, ev->name.len);
 	if(node == NULL)
 		goto error;
 
@@ -651,6 +654,7 @@ struct mi_root * mi_subscribers_list(struct mi_root *cmd_tree, void *param)
 	memset(&prm, 0, sizeof(struct evi_mi_param));
 
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 	node = cmd_tree->node.kids;
 	prm.node = rpl;
 	prm.root = rpl_tree;

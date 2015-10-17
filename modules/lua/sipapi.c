@@ -800,7 +800,7 @@ static int l_siplua_moduleFunc(lua_State *L)
       elems[i + 1].type = STRING_ST;
       elems[i + 1].u.data = str; /* elems[].u.string */
     }
-  act = mk_action(MODULE_T, n - 2 + 1, elems, 0);
+  act = mk_action(MODULE_T, n - 2 + 1, elems, 0, "lua");
   if (!act)
     {
       siplua_moduleFunc_free(func, exp_func_struct, elems, nargs);
@@ -912,7 +912,7 @@ void siplua_register_api_cclosures(lua_State *L)
 /* 		LM_ERR("Invalid URI reference\n"); */
 /* 		ret = NULL; */
 /* 	} else { */
-		
+
 /* 		switch (what) { */
 /* 			case XS_URI_USER:	ret = &(myuri->user); */
 /* 						break; */

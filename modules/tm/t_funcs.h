@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -26,8 +26,8 @@
  *               in a non-gcc specific way (andrei)
  *  2003-03-13  now send_pr_buffer will be called w/ function/line info
  *               only when compiling w/ -DEXTRA_DEBUG (andrei)
- *  2003-03-31  200 for INVITE/UAS resent even for UDP (jiri) 
- *  2007-01-25  DNS failover at transaction level added (bogdan) 
+ *  2003-03-31  200 for INVITE/UAS resent even for UDP (jiri)
+ *  2007-01-25  DNS failover at transaction level added (bogdan)
  */
 
 
@@ -51,17 +51,19 @@
 #include "../../parser/parse_uri.h"
 #include "../../usr_avp.h"
 
+struct s_table;
+struct timer;
+struct entry;
+struct cell;
+struct retr_buf;
+
+#include "t_lookup.h"
 #include "config.h"
 #include "lock.h"
 #include "timer.h"
 #include "sip_msg.h"
 #include "h_table.h"
 #include "ut.h"
-
-struct s_table;
-struct timer;
-struct entry;
-struct cell;
 
 extern int noisy_ctimer;
 
@@ -119,52 +121,14 @@ int send_pr_buffer( struct retr_buf *rb, void *buf, int len);
 #define INIT_REF_UNSAFE(_T_cell) ((_T_cell)->ref_count=1)
 #define IS_REFFED_UNSAFE(_T_cell) ((_T_cell)->ref_count!=0)
 
-/*
- * Parse and fixup the fr_*_timer AVP specs
- */
-int init_avp_params(char *fr_timer_param, char *fr_inv_timer_param);
+#define unset_timeout(timeout) ((timeout) = 0)
+#define is_timeout_set(timeout) ((timeout) != 0)
 
-
-/*
- * Get the FR_{INV}_TIMER from corresponding AVP
- */
-int fr_avp2timer( utime_t* timer);
-int fr_inv_avp2timer( utime_t* timer);
-
-
-
-inline static void _set_fr_retr( struct retr_buf *rb, int retr )
-{
-	utime_t timer;
-
-	if (retr && !rb->retr_timer.deleted) {
-		rb->retr_list=RT_T1_TO_1;
-		set_timer( &rb->retr_timer, RT_T1_TO_1, 0 );
-	}
-
-	if (!fr_avp2timer(&timer)) {
-		LM_DBG("FR_TIMER = %llu\n", timer);
-		set_timer(&rb->fr_timer, FR_TIMER_LIST, &timer);
-	} else {
-		set_timer(&rb->fr_timer, FR_TIMER_LIST, 0);
-	}
-}
-
-
-inline static void start_retr(struct retr_buf *rb)
-{
-	_set_fr_retr(rb, rb->dst.proto==PROTO_UDP);
-}
-
-
-inline static void force_retr(struct retr_buf *rb)
-{
-	_set_fr_retr(rb, 1);
-}
-
+inline void set_fr_retr(struct retr_buf *rb, int retr );
+inline void start_retr(struct retr_buf *rb);
+inline void force_retr(struct retr_buf *rb);
 
 void tm_shutdown();
-
 
 /* function returns:
  *       1 - a new transaction was created

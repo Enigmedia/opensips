@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History
@@ -29,6 +29,7 @@
 #define _DS_BL_H_
 
 #include "../../blacklists.h"
+#include "dispatch.h"
 
 #define DS_BL_MAX_SETS		32
 
@@ -45,6 +46,6 @@ int init_ds_bls(void);
 
 void destroy_ds_bls(void);
 
-int populate_ds_bls(void);
+int populate_ds_bls(ds_set_t *sets);
 
 #endif /* _DS_BL_H_ */

@@ -8,8 +8,7 @@ Bogdan-Andrei Iancu
 
    Copyright © 2009 Voice Sistem SRL
    Revision History
-   Revision $Revision$ $Date: 2012-02-22 19:29:43 +0200
-                              (Wed, 22 Feb 2012) $
+   Revision $Revision: 8740 $ $Date$
      __________________________________________________________
 
    Table of Contents
@@ -69,7 +68,7 @@ Bogdan-Andrei Iancu
    1.8. load_balance usage
    1.9. lb_disable() usage
    1.10. lb_is_destination usage
-   1.11. lb_count_count usage
+   1.11. lb_count_call usage
    1.12. lb_list usage
    1.13. lb_status usage
 
@@ -319,8 +318,8 @@ if (t_check_status("(408)|(5[0-9][0-9])")) {
    Meaning of the parameters is as follows:
      * ip and port - IP and PORT to be checked (any kind of
        variables are allowed, but take care as the PORT variables
-       should have an interger value); A value 0 for the port
-       means "any" - will match any port.
+       should have an integer value); A value 0 for the port means
+       "any" - will match any port.
      * group - in what LB group the destination should be looked
        for; If not specified, the search will be in all groups.
      * active - if "1", the search will be performed only over
@@ -329,7 +328,7 @@ if (t_check_status("(408)|(5[0-9][0-9])")) {
 
    Example 1.10. lb_is_destination usage
 ...
-if (is_destination("$si","$sp") ) {
+if (lb_is_destination("$si","$sp") ) {
         # request from a LB destination
 }
 ...
@@ -356,12 +355,12 @@ if (is_destination("$si","$sp") ) {
    This function can be used from REQUEST_ROUTE, BRANCH_ROUTE and
    FAILURE_ROUTE.
 
-   Example 1.11. lb_count_count usage
+   Example 1.11. lb_count_call usage
 ...
 # count as load also the calls orgininated by lb destinations
 if (lb_is_destination("$si","$sp") ) {
         # inbound call from destination
-        lb_count_count("$si","$sp","-1","conference");
+        lb_count_call("$si","$sp","-1","conference");
 } else {
         # outbound call to destinations
         if ( !load_balance("1","conference") ) {
@@ -486,4 +485,4 @@ Chapter 3. Frequently Asked Questions
        How can I report a bug?
 
        Please follow the guidelines provided at:
-       http://sourceforge.net/tracker/?group_id=232389.
+       https://github.com/OpenSIPS/opensips/issues.

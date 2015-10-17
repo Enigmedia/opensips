@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -59,13 +59,13 @@ enum timer_groups {
 
 
 #include "h_table.h"
-#include "timer.h" 
+#include "timer.h"
 
 /* Uni*x permissions for IPC */
 #define IPC_PERMISSIONS 0666
 
 
-int lock_initialize();
+int lock_initialize( unsigned int timer_sets );
 void lock_cleanup();
 
 #ifdef DBG_LOCK
@@ -89,8 +89,8 @@ int release_timerlist_lock( struct timer *timerlist );
 
 /* lock semaphore s */
 #ifdef DBG_LOCK
-static inline void _lock( ser_lock_t* s , char *file, char *function,
-							unsigned int line )
+static inline void _lock(ser_lock_t* s , const char *file, const char *function,
+                         unsigned int line)
 #else
 static inline void _lock( ser_lock_t* s )
 #endif
@@ -98,7 +98,7 @@ static inline void _lock( ser_lock_t* s )
 #ifdef DBG_LOCK
 	LM_DBG("lock : entered from %s , %s(%d)\n", function, file, line );
 #endif
-#ifdef GEN_LOCK_T_PREFERED 
+#ifdef GEN_LOCK_T_PREFERED
 	lock_get(s);
 #else
 	lock_set_get(s->semaphore_set, s->semaphore_index);
@@ -108,8 +108,8 @@ static inline void _lock( ser_lock_t* s )
 
 
 #ifdef DBG_LOCK
-static inline void _unlock( ser_lock_t* s, char *file, char *function,
-		unsigned int line )
+static inline void _unlock(ser_lock_t* s, const char *file, const char *function,
+                           unsigned int line)
 #else
 static inline void _unlock( ser_lock_t* s )
 #endif
@@ -124,7 +124,7 @@ static inline void _unlock( ser_lock_t* s )
 #endif
 }
 
-int init_timerlist_lock(  enum lists timerlist_id);
+int init_timerlist_lock( unsigned int set, enum lists timerlist_id);
 
 
 #endif

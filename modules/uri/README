@@ -20,8 +20,7 @@ Irina-Maria Stanescu
 
    Copyright © 2005, 2009 Voice Sistem SRL
    Revision History
-   Revision $Revision$ $Date: 2012-02-22 19:29:43 +0200
-                              (Wed, 22 Feb 2012) $
+   Revision $Revision: 8740 $ $Date$
      __________________________________________________________
 
    Table of Contents
@@ -277,8 +276,8 @@ if (db_check_from()) {
    Check if username in the request URI belongs to an existing
    user.
 
-   As the checking is done against URI table (if use_uri_table is
-   set) or subscriber table.
+   Matching is done against the URI table (if use_uri_table is
+   set) or the subscriber table.
 
    This function can be used from REQUEST_ROUTE.
 
@@ -449,8 +448,8 @@ tel2sip();
 if (is_uri_user_e164("$fu")) {  # Check From header URI user part
    ...
 }
-if (is_uri_user_e164("$avp(i:705)") {
-   # Check user part of URI stored in avp i:705
+if (is_uri_user_e164("$avp(uri)") {
+   # Check user part of URI stored in avp uri
    ...
 };
 ...

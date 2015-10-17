@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -66,17 +66,17 @@
 int fixup_str(void** param)
 {
 	str* s;
-	
+
 	s = (str*)pkg_malloc(sizeof(str));
 	if (!s) {
 		LM_ERR("no more pkg memory\n");
 		return E_UNSPEC;
 	}
-		
+
 	s->s = (char*)*param;
 	s->len = strlen(s->s);
 	*param = (void*)s;
-	
+
 	return 0;
 }
 
@@ -203,7 +203,6 @@ int fixup_uint_uint(void** param, int param_no)
 	return fixup_uint(param);
 }
 
-#if 0
 /*! \brief
  * - helper function
  * Convert char* parameter to signed int
@@ -220,7 +219,7 @@ int fixup_sint( void** param)
 	if(str2sint(&s, &si)==0)
 	{
 		pkg_free(*param);
-		*param=(void *)si;
+		*param=(void *)(unsigned long)si;
 		return 0;
 	}
 	LM_ERR("bad number <%s>\n", (char *)(*param));
@@ -256,6 +255,7 @@ int fixup_sint_sint(void** param, int param_no)
 	return fixup_sint(param);
 }
 
+#if 0
 /*! \brief
  * fixup for functions that get two parameters
  * - first parameter is converted to signed int
@@ -527,7 +527,7 @@ int fixup_free_pvar_pvar(void** param, int param_no)
 	{
 	    LM_ERR("invalid parameter number %d\n", param_no);
 	    return E_UNSPEC;
-	}	
+	}
 	return fixup_free_pvar(param);
 }
 
@@ -617,7 +617,7 @@ int fixup_igp(void** param)
 {
 	str s;
 	gparam_p gp = NULL;
-	
+
 	gp = (gparam_p)pkg_malloc(sizeof(gparam_t));
 	if(gp == NULL)
 	{
@@ -661,7 +661,7 @@ int fixup_sgp(void** param)
 {
 	str s;
 	gparam_p gp = NULL;
-	
+
 	gp = (gparam_p)pkg_malloc(sizeof(gparam_t));
 	if(gp == NULL)
 	{
@@ -809,8 +809,8 @@ int fixup_get_ivalue(struct sip_msg* msg, gparam_p gp, int *val)
 		*val = gp->v.ival;
 		return 0;
 	}
-	
-	if(pv_get_spec_value(msg, gp->v.pvs, &value)!=0 
+
+	if(pv_get_spec_value(msg, gp->v.pvs, &value)!=0
 			|| value.flags&PV_VAL_NULL || !(value.flags&PV_VAL_INT))
 	{
 		LM_ERR("no valid PV value found (error in scripts)\n");
@@ -828,7 +828,7 @@ int fixup_spve(void** param)
 {
 	str s;
 	gparam_p gp = NULL;
-	
+
 	gp = (gparam_p)pkg_malloc(sizeof(gparam_t));
 	if(gp == NULL)
 	{
@@ -850,7 +850,7 @@ int fixup_spve(void** param)
 		gp->v.sval = s;
 	} else {
 		gp->type = GPARAM_TYPE_PVE;
-	}			
+	}
 	*param = (void*)gp;
 	return 0;
 }
@@ -898,7 +898,7 @@ int fixup_spve_uint(void** param, int param_no)
 	}
 	if (param_no == 1)
 		return fixup_spve(param);
-		
+
 	return fixup_uint(param);
 }
 
@@ -915,10 +915,10 @@ int fixup_get_svalue(struct sip_msg* msg, gparam_p gp, str *val)
 		*val = gp->v.sval;
 		return 0;
 	}
-	
+
 	if(gp->type==GPARAM_TYPE_PVS)
 	{
-		if(pv_get_spec_value(msg, gp->v.pvs, &value)!=0 
+		if(pv_get_spec_value(msg, gp->v.pvs, &value)!=0
 				|| value.flags&PV_VAL_NULL || !(value.flags&PV_VAL_STR))
 		{
 			LM_ERR("no valid PV value found (error in scripts)\n");
@@ -939,5 +939,66 @@ int fixup_get_svalue(struct sip_msg* msg, gparam_p gp, str *val)
 	}
 
 	return -1;
+}
+
+/*! \brief
+ * - helper function
+ * Return string and/or int value from a gparam_t
+ */
+int fixup_get_isvalue(struct sip_msg* msg, gparam_p gp,
+			int *i_val, str *s_val, unsigned int *flags)
+{
+	pv_value_t value;
+
+	*flags = 0;
+	switch(gp->type)
+	{
+	case GPARAM_TYPE_INT:
+		*i_val = gp->v.ival;
+		*flags |= GPARAM_INT_VALUE_FLAG;
+		break;
+	case GPARAM_TYPE_STR:
+		*s_val = gp->v.sval;
+		*flags |= GPARAM_STR_VALUE_FLAG;
+		break;
+	case GPARAM_TYPE_PVE:
+		if(pv_printf_s( msg, gp->v.pve, s_val)!=0)
+		{
+			LM_ERR("cannot print the PV-formated string\n");
+			return -1;
+		}
+		*flags |= GPARAM_STR_VALUE_FLAG;
+		break;
+	case GPARAM_TYPE_PVS:
+		if(pv_get_spec_value(msg, gp->v.pvs, &value)!=0
+			|| value.flags&PV_VAL_NULL)
+		{
+			LM_ERR("no valid PV value found (error in scripts)\n");
+			return -1;
+		}
+		if(value.flags&PV_VAL_INT)
+		{
+			*i_val = value.ri;
+			*flags |= GPARAM_INT_VALUE_FLAG;
+		}
+		if(value.flags&PV_VAL_STR)
+		{
+			*s_val = value.rs;
+			*flags |= GPARAM_STR_VALUE_FLAG;
+		}
+		break;
+	default:
+		LM_ERR("unexpected gp->type=[%d]\n", gp->type);
+		return -1;
+	}
+
+	/* Let's convert to int, if possible */
+	if (!(*flags & GPARAM_INT_VALUE_FLAG) && (*flags & GPARAM_STR_VALUE_FLAG)
+		&& str2sint(s_val, i_val) == 0)
+		*flags |= GPARAM_INT_VALUE_FLAG;
+
+	if (!*flags) return -1;
+
+	return 0;
 }
 

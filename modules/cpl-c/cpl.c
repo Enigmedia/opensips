@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -28,7 +28,7 @@
  * 2004-06-14: all global variables merged into cpl_env and cpl_fct;
  *             case_sensitive and realm_prefix added for building AORs - see
  *             build_userhost (bogdan)
- * 2004-10-09: added process_register_norpl to allow register processing 
+ * 2004-10-09: added process_register_norpl to allow register processing
  *             without sending the reply(bogdan) - based on a patch sent by
  *             Christopher Crawford
  */
@@ -75,7 +75,6 @@ static str db_url          = {NULL, 0}; /* database url */
 static str db_table        = str_init("cpl");  /* database table */
 static char *dtd_file      = 0;  /* name of the DTD file for CPL parser */
 static char *lookup_domain = 0;
-static str  timer_avp      = {NULL, 0};  /* name of variable timer AVP */
 static char* proxy_route   = NULL;
 
 
@@ -89,8 +88,6 @@ struct cpl_enviroment    cpl_env = {
 		{0,0},   /* original TZ \0 terminated "TZ=value" format */
 		0,   /* udomain */
 		0,   /* no branches on lookup */
-		0,   /* timer avp type */
-		-1,  /* timer avp name/ID */
 		0    /* use_domain */
 };
 
@@ -146,7 +143,6 @@ static param_export_t params[] = {
 	{"realm_prefix",   STR_PARAM, &cpl_env.realm_prefix.s            },
 	{"lookup_domain",  STR_PARAM, &lookup_domain                     },
 	{"lookup_append_branches", INT_PARAM, &cpl_env.lu_append_branches},
-	{"timer_avp",      STR_PARAM, &timer_avp.s                       },
 	{"username_column",STR_PARAM, &cpl_username_col                  },
 	{"domain_column",  STR_PARAM, &cpl_domain_col                    },
 	{"cpl_xml_column", STR_PARAM, &cpl_xml_col                       },
@@ -228,12 +224,9 @@ static int cpl_init(void)
 	struct stat   stat_t;
 	char *ptr;
 	int val;
-	pv_spec_t avp_spec;
-	unsigned short avp_type;
 
 	init_db_url( db_url , 0 /*cannot be null*/);
 	db_table.len = strlen(db_table.s);
-	if (timer_avp.s) timer_avp.len = strlen(timer_avp.s);
 
 	LM_INFO("initializing...\n");
 
@@ -251,23 +244,6 @@ static int cpl_init(void)
 			"the maximum safety value (%d)\n",
 			cpl_env.proxy_recurse,MAX_PROXY_RECURSE);
 		goto error;
-	}
-
-	/* fix the timer_avp name */
-	if (timer_avp.s && timer_avp.len > 0) {
-		if (pv_parse_spec(&timer_avp, &avp_spec)==0
-				|| avp_spec.type!=PVT_AVP) {
-			LM_ERR("malformed or non AVP %.*s AVP definition\n", timer_avp.len, timer_avp.s);
-			return -1;
-		}
-
-		if(pv_get_avp_name(0, &(avp_spec.pvp), &cpl_env.timer_avp,
-							&avp_type)!=0)
-		{
-			LM_ERR("[%.*s]- invalid AVP definition\n", timer_avp.len, timer_avp.s);
-			return -1;
-		}
-		cpl_env.timer_avp_type = avp_type;
 	}
 
 	if (dtd_file==0) {
@@ -518,7 +494,7 @@ static inline int get_orig_user(struct sip_msg *msg, str *username, str *domain)
 {
 	struct to_body *from;
 	struct sip_uri uri;
-	
+
 	/* if it's outgoing -> get the user_name from From */
 	/* parsing from header */
 	LM_DBG("trying to get user from From\n");
@@ -539,9 +515,9 @@ static inline int get_orig_user(struct sip_msg *msg, str *username, str *domain)
 
 
 
-/* Params: 
- *   str1 - as unsigned int - can be CPL_RUN_INCOMING or CPL_RUN_OUTGOING 
- *   str2 - as unsigned int - flags regarding state(less)|(ful) 
+/* Params:
+ *   str1 - as unsigned int - can be CPL_RUN_INCOMING or CPL_RUN_OUTGOING
+ *   str2 - as unsigned int - flags regarding state(less)|(ful)
  */
 static int cpl_invoke_script(struct sip_msg* msg, char* str1, char* str2)
 {

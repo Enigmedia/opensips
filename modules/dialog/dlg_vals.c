@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -68,8 +68,7 @@ static inline struct dlg_val *new_dlg_val(str *name, str *val)
 	return dv;
 }
 
-
-int store_dlg_value(struct dlg_cell *dlg, str *name, str *val)
+int store_dlg_value_unsafe(struct dlg_cell *dlg, str *name, str *val)
 {
 	struct dlg_val *dv=NULL;
 	struct dlg_val *it;
@@ -82,9 +81,6 @@ int store_dlg_value(struct dlg_cell *dlg, str *name, str *val)
 	}
 
 	id = _get_name_id(name);
-
-	/* lock dialog */
-	dlg_lock_dlg( dlg );
 
 	/* iterate the list */
 	for( it_prev=NULL, it=dlg->vals ; it ; it_prev=it,it=it->next) {
@@ -104,29 +100,41 @@ int store_dlg_value(struct dlg_cell *dlg, str *name, str *val)
 			}
 			dlg->flags |= DLG_FLAG_VP_CHANGED;
 
-			/* unlock dialog */
-			dlg_unlock_dlg( dlg );
-
 			shm_free(it);
 			return 0;
 		}
 	}
 
-	/* not found -> simply add a new one */
+	/* not found */
+	if (val==NULL)
+		return 0;
+
+	/* has value ? -> simply add a new one */
 
 	/* insert at the beginning of the list */
 	dv->next = dlg->vals;
 	dlg->vals = dv;
 
 	dlg->flags |= DLG_FLAG_VP_CHANGED;
-	/* unlock dialog */
-	dlg_unlock_dlg( dlg );
 
 	return 0;
 }
 
+int store_dlg_value(struct dlg_cell *dlg, str *name, str *val)
+{
+	int ret;
+
+	/* lock dialog */
+	dlg_lock_dlg( dlg );
+	ret = store_dlg_value_unsafe(dlg,name,val);
+	/* unlock dialog */
+	dlg_unlock_dlg( dlg );
+
+	return ret;
+}
 
 static str val_buf = { NULL, 0};
+static int val_buf_size;
 
 
 int fetch_dlg_value(struct dlg_cell *dlg, str *name,str *ival, int val_has_buf)
@@ -139,7 +147,11 @@ int fetch_dlg_value(struct dlg_cell *dlg, str *name,str *ival, int val_has_buf)
 
 	id = _get_name_id(name);
 
-	val = val_has_buf ? ival : &val_buf;
+	if (!val_has_buf) {
+		val = &val_buf;
+		val->len = val_buf_size;
+	} else
+		val = ival;
 
 	/* lock dialog */
 	dlg_lock_dlg( dlg );
@@ -153,10 +165,16 @@ int fetch_dlg_value(struct dlg_cell *dlg, str *name,str *ival, int val_has_buf)
 			if (dv->val.len > val->len) {
 				val->s = (char*)pkg_realloc(val->s,dv->val.len);
 				if (val->s==NULL) {
+					if (!val_has_buf)
+						val_buf_size = 0;
+
 					dlg_unlock_dlg( dlg );
 					LM_ERR("failed to do realloc for %d\n",dv->val.len);
 					return -1;
 				}
+
+				if (!val_has_buf)
+					val_buf_size = dv->val.len;
 			}
 			memcpy( val->s, dv->val.s, dv->val.len );
 			val->len = dv->val.len;
@@ -191,7 +209,7 @@ int check_dlg_value_unsafe(struct dlg_cell *dlg, str *name, str *val)
 		if (id==dv->id && name->len==dv->name.len &&
 		memcmp(name->s,dv->name.s,name->len)==0 ) {
 			LM_DBG("var found with val <%.*s>!\n",dv->val.len,dv->val.s);
-			if ( val->len==dv->val.len && 
+			if ( val->len==dv->val.len &&
 			memcmp(val->s,dv->val.s,val->len)==0) {
 				LM_DBG("var found!\n");
 				return 0;

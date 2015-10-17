@@ -71,6 +71,10 @@
  *  2007-01-25  disable_dns_failover option added (bogdan)
  *  2012-01-19  added TCP keepalive support
  *  2012-12-06  added event_route (razvanc)
+ *  2013-05-23  added NAPTR lookup option (dsandras)
+ *	2013-09-25	added TLS_CA_DIR option (chris_secusmart)
+ *	2013-10-06	added TLS_DH_PARAM option (mehmet_secusmart)
+ *	2013-10-30	added TLS_EC_CURVE option (yrjoe_secusmart)
  */
 
 
@@ -106,6 +110,7 @@
 #include "tcp_server.h"
 #include "tcp_conn.h"
 #include "db/db_insertq.h"
+#include "bin_interface.h"
 
 
 #include "config.h"
@@ -131,7 +136,6 @@ static int i_tmp;
 static void* cmd_tmp;
 static struct socket_id* lst_tmp;
 static int rt;  /* Type of route block for find_export */
-static str* str_tmp;
 static str s_tmp;
 static str tstr;
 static struct ip_addr* ip_tmp;
@@ -154,16 +158,28 @@ static char mpath_buf[256];
 static int  mpath_len = 0;
 
 extern int line;
+extern int column;
+extern int startcolumn;
+extern char *finame;
 
+#define get_cfg_file_name \
+	((finame) ? finame : cfg_file ? cfg_file : "default")
+
+
+
+#define mk_action_(_res, _type, _no, _elems) \
+	do { \
+		_res = mk_action(_type, _no, _elems, line, get_cfg_file_name); \
+	} while(0)
 #define mk_action0(_res, _type, _p1_type, _p2_type, _p1, _p2) \
 	do { \
-		_res = mk_action(_type, 0, 0, line); \
+		_res = mk_action(_type, 0, 0, line, get_cfg_file_name); \
 	} while(0)
 #define mk_action1(_res, _type, _p1_type, _p1) \
 	do { \
 		elems[0].type = _p1_type; \
 		elems[0].u.data = _p1; \
-		_res = mk_action(_type, 1, elems, line); \
+		_res = mk_action(_type, 1, elems, line, get_cfg_file_name); \
 	} while(0)
 #define	mk_action2(_res, _type, _p1_type, _p2_type, _p1, _p2) \
 	do { \
@@ -171,7 +187,7 @@ extern int line;
 		elems[0].u.data = _p1; \
 		elems[1].type = _p2_type; \
 		elems[1].u.data = _p2; \
-		_res = mk_action(_type, 2, elems, line); \
+		_res = mk_action(_type, 2, elems, line, get_cfg_file_name); \
 	} while(0)
 #define mk_action3(_res, _type, _p1_type, _p2_type, _p3_type, _p1, _p2, _p3) \
 	do { \
@@ -181,7 +197,7 @@ extern int line;
 		elems[1].u.data = _p2; \
 		elems[2].type = _p3_type; \
 		elems[2].u.data = _p3; \
-		_res = mk_action(_type, 3, elems, line); \
+		_res = mk_action(_type, 3, elems, line, get_cfg_file_name); \
 	} while(0)
 
 %}
@@ -244,6 +260,8 @@ extern int line;
 %token DEFAULT
 %token SBREAK
 %token WHILE
+%token FOR
+%token IN
 %token SET_ADV_ADDRESS
 %token SET_ADV_PORT
 %token FORCE_SEND_SOCKET
@@ -304,11 +322,14 @@ extern int line;
 %token LOGNAME
 %token AVP_ALIASES
 %token LISTEN
+%token BIN_LISTEN
+%token BIN_CHILDREN
 %token ALIAS
 %token AUTO_ALIASES
 %token DNS
 %token REV_DNS
 %token DNS_TRY_IPV6
+%token DNS_TRY_NAPTR
 %token DNS_RETR_TIME
 %token DNS_RETR_NO
 %token DNS_SERVERS_NO
@@ -317,6 +338,11 @@ extern int line;
 %token PORT
 %token CHILDREN
 %token CHECK_VIA
+%token SHM_HASH_SPLIT_PERCENTAGE
+%token SHM_SECONDARY_HASH_SIZE
+%token MEM_WARMING_ENABLED
+%token MEM_WARMING_PATTERN_FILE
+%token MEM_WARMING_PERCENTAGE
 %token MEMLOG
 %token MEMDUMP
 %token EXECMSGTHRESHOLD
@@ -346,6 +372,10 @@ extern int line;
 %token WDIR
 %token MHOMED
 %token DISABLE_TCP
+%token ASYNC_TCP
+%token ASYNC_TCP_LOCAL_CON_TIMEOUT
+%token ASYNC_TCP_LOCAL_WRITE_TIMEOUT
+%token ASYNC_TCP_MAX_POSTPONED_CHUNKS
 %token TCP_ACCEPT_ALIASES
 %token TCP_CHILDREN
 %token TCP_CONNECT_TIMEOUT
@@ -360,6 +390,8 @@ extern int line;
 %token TCP_KEEPCOUNT
 %token TCP_KEEPIDLE
 %token TCP_KEEPINTERVAL
+%token TCP_MAX_MSG_CHUNKS
+%token TCP_MAX_MSG_TIME
 %token DISABLE_TLS
 %token TLSLOG
 %token TLS_PORT_NO
@@ -373,13 +405,17 @@ extern int line;
 %token SSLv2
 %token SSLv3
 %token TLSv1
+%token TLSv1_2
 %token TLS_VERIFY_CLIENT
 %token TLS_VERIFY_SERVER
 %token TLS_REQUIRE_CLIENT_CERTIFICATE
 %token TLS_CERTIFICATE
 %token TLS_PRIVATE_KEY
 %token TLS_CA_LIST
+%token TLS_CA_DIR 
 %token TLS_CIPHERS_LIST
+%token TLS_DH_PARAMS
+%token TLS_EC_CURVE
 %token ADVERTISED_ADDRESS
 %token ADVERTISED_PORT
 %token DISABLE_CORE
@@ -453,6 +489,7 @@ extern int line;
 /*non-terminals */
 %type <expr> exp exp_elem exp_cond assignexp /*, condition*/
 %type <action> action actions cmd if_cmd stm exp_stm assign_cmd while_cmd
+			   foreach_cmd
 %type <action> switch_cmd switch_stm case_stms case_stm default_stm
 %type <intval> module_func_param
 %type <ipaddr> ipv4 ipv6 ipv6addr ip
@@ -473,6 +510,11 @@ extern int line;
 %type <strval> route_name
 %type <intval> route_param
 
+/*
+ * since "if_cmd" is inherently ambiguous,
+ * skip 1 harmless shift/reduce conflict when compiling our grammar
+ */
+%expect 1
 
 
 %%
@@ -643,6 +685,8 @@ assign_stm: DEBUG EQUAL snumber {
 		| REV_DNS EQUAL error { yyerror("boolean value expected"); }
 		| DNS_TRY_IPV6 EQUAL NUMBER   { dns_try_ipv6=$3; }
 		| DNS_TRY_IPV6 error { yyerror("boolean value expected"); }
+		| DNS_TRY_NAPTR EQUAL NUMBER   { dns_try_naptr=$3; }
+		| DNS_TRY_NAPTR error { yyerror("boolean value expected"); }
 		| DNS_RETR_TIME EQUAL NUMBER   { dns_retr_time=$3; }
 		| DNS_RETR_TIME error { yyerror("number expected"); }
 		| DNS_RETR_NO EQUAL NUMBER   { dns_retr_no=$3; }
@@ -661,6 +705,46 @@ assign_stm: DEBUG EQUAL snumber {
 		| CHILDREN EQUAL error { yyerror("number expected"); } 
 		| CHECK_VIA EQUAL NUMBER { check_via=$3; }
 		| CHECK_VIA EQUAL error { yyerror("boolean value expected"); }
+		| SHM_HASH_SPLIT_PERCENTAGE EQUAL NUMBER {
+			#ifdef HP_MALLOC
+			shm_hash_split_percentage=$3;
+			#else
+			yyerror("Cannot set parameter; Please recompile with support for HP_MALLOC");
+			#endif
+			}
+		| SHM_HASH_SPLIT_PERCENTAGE EQUAL error { yyerror("number expected"); }
+		| SHM_SECONDARY_HASH_SIZE EQUAL NUMBER {
+			#ifdef HP_MALLOC
+			shm_secondary_hash_size=$3;
+			#else
+			yyerror("Cannot set parameter; Please recompile with support for HP_MALLOC");
+			#endif
+			}
+		| SHM_SECONDARY_HASH_SIZE EQUAL error { yyerror("number expected"); }
+		| MEM_WARMING_ENABLED EQUAL NUMBER {
+			#ifdef HP_MALLOC
+			mem_warming_enabled = $3;
+			#else
+			yyerror("Cannot set parameter; Please recompile with support for HP_MALLOC");
+			#endif
+			}
+		| MEM_WARMING_ENABLED EQUAL error { yyerror("number expected"); }
+		| MEM_WARMING_PATTERN_FILE EQUAL STRING {
+			#ifdef HP_MALLOC
+			mem_warming_pattern_file = $3;
+			#else
+			yyerror("Cannot set parameter; Please recompile with support for HP_MALLOC");
+			#endif
+			}
+		| MEM_WARMING_PATTERN_FILE EQUAL error { yyerror("string expected"); }
+		| MEM_WARMING_PERCENTAGE EQUAL NUMBER {
+			#ifdef HP_MALLOC
+			mem_warming_percentage = $3;
+			#else
+			yyerror("Cannot set parameter; Please recompile with support for HP_MALLOC");
+			#endif
+			}
+		| MEM_WARMING_PERCENTAGE EQUAL error { yyerror("number expected"); }
 		| MEMLOG EQUAL NUMBER { memlog=$3; memdump=$3; }
 		| MEMLOG EQUAL error { yyerror("int value expected"); }
 		| MEMDUMP EQUAL NUMBER { memdump=$3; }
@@ -686,7 +770,7 @@ assign_stm: DEBUG EQUAL snumber {
 			}
 		| EVENT_SHM_THRESHOLD EQUAL error { yyerror("int value expected"); }
 		| EVENT_PKG_THRESHOLD EQUAL NUMBER {
-			#ifdef PKG_MEM
+			#ifdef PKG_MALLOC
                                 #ifdef STATISTICS
                                         if ($3 < 0 || $3 > 100)
                                                 yyerror("PKG threshold has to be a percentage between 0 and 100");
@@ -694,7 +778,7 @@ assign_stm: DEBUG EQUAL snumber {
                                 #else
                                         yyerror("statistics support not compiled in");
                                 #endif
-			#else /* PKG_MEM */
+			#else /* PKG_MALLOC */
 				yyerror("pkg memory support not compiled in");
 			#endif
 			}
@@ -727,6 +811,38 @@ assign_stm: DEBUG EQUAL snumber {
 									#endif
 									}
 		| DISABLE_TCP EQUAL error { yyerror("boolean value expected"); }
+		| ASYNC_TCP EQUAL NUMBER {
+									#ifdef USE_TCP
+										tcp_async=$3;
+									#else
+										warn("tcp support not compiled in");
+									#endif
+									}
+		| ASYNC_TCP EQUAL error { yyerror("boolean value expected"); }
+		| ASYNC_TCP_LOCAL_CON_TIMEOUT EQUAL NUMBER {
+									#ifdef USE_TCP
+										tcp_async_local_connect_timeout=$3;
+									#else
+										warn("tcp support not compiled in");
+									#endif
+									}
+		| ASYNC_TCP_LOCAL_CON_TIMEOUT EQUAL error { yyerror("boolean value expected"); }
+		| ASYNC_TCP_LOCAL_WRITE_TIMEOUT EQUAL NUMBER {
+									#ifdef USE_TCP
+										tcp_async_local_write_timeout=$3;
+									#else
+										warn("tcp support not compiled in");
+									#endif
+									}
+		| ASYNC_TCP_LOCAL_WRITE_TIMEOUT EQUAL error { yyerror("boolean value expected"); }
+		| ASYNC_TCP_MAX_POSTPONED_CHUNKS EQUAL NUMBER {
+									#ifdef USE_TCP
+										tcp_async_max_postponed_chunks=$3;
+									#else
+										warn("tcp support not compiled in");
+									#endif
+									}
+		| ASYNC_TCP_MAX_POSTPONED_CHUNKS EQUAL error { yyerror("boolean value expected"); }
 		| TCP_ACCEPT_ALIASES EQUAL NUMBER {
 									#ifdef USE_TCP
 										tcp_accept_aliases=$3;
@@ -822,7 +938,8 @@ assign_stm: DEBUG EQUAL snumber {
 		| TCP_OPT_CRLF_PINGPONG EQUAL error { yyerror("boolean value expected"); }
 		| TCP_NO_NEW_CONN_BFLAG EQUAL NUMBER {
 			#ifdef USE_TCP
-				fix_flag_name(&tmp, $3);
+				tmp = NULL;
+				fix_flag_name(tmp, $3);
 				tcp_no_new_conn_bflag = get_flag_id_by_name(FLAG_TYPE_BRANCH, tmp);
 				if (!flag_in_range( (flag_t)tcp_no_new_conn_bflag ) )
 					yyerror("invalid TCP no_new_conn Branch Flag");
@@ -850,6 +967,22 @@ assign_stm: DEBUG EQUAL snumber {
 			#endif
 		}
 		| TCP_KEEPALIVE EQUAL error { yyerror("boolean value expected"); }
+		| TCP_MAX_MSG_CHUNKS EQUAL NUMBER {
+			#ifdef USE_TCP
+			        tcp_max_msg_chunks=$3;
+			#else
+				warn("tcp support not compiled in");
+			#endif
+		}
+		| TCP_MAX_MSG_CHUNKS EQUAL error { yyerror("boolean value expected"); }
+		| TCP_MAX_MSG_TIME EQUAL NUMBER {
+			#ifdef USE_TCP
+			        tcp_max_msg_time=$3;
+			#else
+				warn("tcp support not compiled in");
+			#endif
+		}
+		| TCP_MAX_MSG_TIME EQUAL error { yyerror("boolean value expected"); }
 		| TCP_KEEPCOUNT EQUAL NUMBER 		{ 
 			#ifdef USE_TCP
 			    #ifndef HAVE_TCP_KEEPCNT
@@ -950,9 +1083,19 @@ assign_stm: DEBUG EQUAL snumber {
 										warn("tls support not compiled in");
 									#endif
 									}
+		| TLS_METHOD EQUAL TLSv1_2 {
+									#ifdef USE_TLS
+										tls_default_server_domain->method =
+											TLS_USE_TLSv1_2;
+										tls_default_client_domain->method =
+											TLS_USE_TLSv1_2;
+									#else
+										warn("tls support not compiled in");
+									#endif
+									}
 		| TLS_METHOD EQUAL error {
 									#ifdef USE_TLS
-										yyerror("SSLv23, SSLv2, SSLv3 or TLSv1"
+										yyerror("SSLv23, SSLv2, SSLv3, TLSv1 or TLSv1_2"
 													" expected");
 									#else
 										warn("tls support not compiled in");
@@ -1018,6 +1161,17 @@ assign_stm: DEBUG EQUAL snumber {
 									#endif
 									}
 		| TLS_CA_LIST EQUAL error { yyerror("string value expected"); }
+  	        | TLS_CA_DIR EQUAL STRING {
+                                                                        #ifdef USE_TLS
+                                                                                tls_default_server_domain->ca_directory =
+                                                                                        $3;
+                                                                                tls_default_client_domain->ca_directory =
+                                                                                        $3;
+                                                                        #else
+                                                                                warn("tls support not compiled in");
+                                                                        #endif
+                                                                        }
+                | TLS_CA_DIR EQUAL error { yyerror("string value expected"); }
 		| TLS_CIPHERS_LIST EQUAL STRING { 
 									#ifdef USE_TLS
 										tls_default_server_domain->ciphers_list
@@ -1029,6 +1183,28 @@ assign_stm: DEBUG EQUAL snumber {
 									#endif
 									}
 		| TLS_CIPHERS_LIST EQUAL error { yyerror("string value expected"); }
+		| TLS_DH_PARAMS EQUAL STRING { 
+									#ifdef USE_TLS
+										tls_default_server_domain->tmp_dh_file =
+											$3;
+										tls_default_client_domain->tmp_dh_file =
+											$3;
+									#else
+										warn("tls support not compiled in");
+									#endif
+									}
+		| TLS_DH_PARAMS EQUAL error { yyerror("string value expected"); }
+		| TLS_EC_CURVE EQUAL STRING { 
+									#ifdef USE_TLS
+										tls_default_server_domain->tls_ec_curve =
+											$3;
+										tls_default_client_domain->tls_ec_curve =
+											$3;
+									#else
+										warn("tls support not compiled in");
+									#endif
+									}
+		| TLS_EC_CURVE EQUAL error { yyerror("string value expected"); }
 		| TLS_HANDSHAKE_TIMEOUT EQUAL NUMBER {
 									#ifdef USE_TLS
 										tls_handshake_timeout=$3;
@@ -1073,7 +1249,6 @@ assign_stm: DEBUG EQUAL snumber {
 		| XLOG_FORCE_COLOR EQUAL NUMBER { xlog_force_color = $3; } 
 		| XLOG_BUF_SIZE EQUAL error { yyerror("number expected"); }
 		| XLOG_FORCE_COLOR EQUAL error { yyerror("boolean value expected"); }
-			
 		| LISTEN EQUAL listen_lst {
 							for(lst_tmp=$3; lst_tmp; lst_tmp=lst_tmp->next){
 								if (add_listen_iface(	lst_tmp->name,
@@ -1093,6 +1268,30 @@ assign_stm: DEBUG EQUAL snumber {
 		| LISTEN EQUAL  error { yyerror("ip address or hostname "
 						"expected (use quotes if the hostname includes"
 						" config keywords)"); }
+		| BIN_LISTEN EQUAL listen_id COLON port {
+					if (bin) {
+						yyerror("can only define one binary packet interface");
+						YYABORT;
+					}
+
+					lst_tmp = mk_listen_id($3, PROTO_UDP, $5);
+					bin = new_sock_info(lst_tmp->name,
+										lst_tmp->port,
+										lst_tmp->proto,
+										lst_tmp->adv_name,
+										lst_tmp->adv_port,
+										lst_tmp->children,
+										0);
+					if (!bin) {
+						LM_CRIT("Failed to create new socket info!\n");
+						YYABORT;
+					}
+							}
+		| BIN_LISTEN EQUAL  error { yyerror("ip address or hostname "
+						"expected (use quotes if the hostname includes"
+						" config keywords)"); }
+		| BIN_CHILDREN EQUAL NUMBER { bin_children=$3; }
+		| BIN_CHILDREN EQUAL error { yyerror("number expected"); }
 		| ALIAS EQUAL  id_lst { 
 							for(lst_tmp=$3; lst_tmp; lst_tmp=lst_tmp->next)
 								add_alias(lst_tmp->name, strlen(lst_tmp->name),
@@ -1108,19 +1307,22 @@ assign_stm: DEBUG EQUAL snumber {
 									default_global_address.len=strlen($3);
 								}
 								}
-		|ADVERTISED_ADDRESS EQUAL error {yyerror("ip address or hostname "
+		| ADVERTISED_ADDRESS EQUAL error {yyerror("ip address or hostname "
 												"expected"); }
 		| ADVERTISED_PORT EQUAL NUMBER {
-								tmp=int2str($3, &i_tmp);
-								if ((default_global_port.s=pkg_malloc(i_tmp))
-										==0){
-										LM_CRIT("cfg. parser: out of memory.\n");
-										default_global_port.len=0;
-								}else{
-									default_global_port.len=i_tmp;
+								tmp = int2str($3, &i_tmp);
+								if (i_tmp > default_global_port.len)
+									default_global_port.s =
+										pkg_realloc(default_global_port.s, i_tmp);
+
+								if (!default_global_port.s) {
+									LM_CRIT("cfg. parser: out of memory.\n");
+									default_global_port.len = 0;
+								} else {
+									default_global_port.len = i_tmp;
 									memcpy(default_global_port.s, tmp,
 											default_global_port.len);
-								};
+								}
 								}
 		|ADVERTISED_PORT EQUAL error {yyerror("ip address or hostname "
 												"expected"); }
@@ -1408,7 +1610,14 @@ tls_server_var : TLS_METHOD EQUAL SSLv23 {
 									warn("tls support not compiled in");
 						#endif
 								}
-	| TLS_METHOD EQUAL error { yyerror("SSLv23, SSLv2, SSLv3 or TLSv1 expected"); }
+	| TLS_METHOD EQUAL TLSv1_2 { 
+						#ifdef USE_TLS
+									tls_server_domains->method=TLS_USE_TLSv1_2;
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}
+	| TLS_METHOD EQUAL error { yyerror("SSLv23, SSLv2, SSLv3, TLSv1 or TLSV1_2 expected"); }
 	| TLS_CERTIFICATE EQUAL STRING { 
 						#ifdef USE_TLS
 									tls_server_domains->cert_file=$3;
@@ -1435,6 +1644,14 @@ tls_server_var : TLS_METHOD EQUAL SSLv23 {
 						#endif
 								}	
 	| TLS_CA_LIST EQUAL error { yyerror("string value expected"); }
+	| TLS_CA_DIR EQUAL STRING {
+                                                #ifdef USE_TLS
+                                                                        tls_server_domains->ca_directory=$3;
+                                                #else
+                                                                        warn("tls support not compiled in");
+                                                #endif
+                                                                }
+        | TLS_CA_DIR EQUAL error { yyerror("string value expected"); }
 	| TLS_CIPHERS_LIST EQUAL STRING { 
 						#ifdef USE_TLS
 									tls_server_domains->ciphers_list=$3;
@@ -1443,6 +1660,22 @@ tls_server_var : TLS_METHOD EQUAL SSLv23 {
 						#endif
 								}
 	| TLS_CIPHERS_LIST EQUAL error { yyerror("string value expected"); }
+	| TLS_DH_PARAMS EQUAL STRING { 
+						#ifdef USE_TLS
+									tls_server_domains->tmp_dh_file=$3; 
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}	
+	| TLS_DH_PARAMS EQUAL error { yyerror("string value expected"); }
+	| TLS_EC_CURVE EQUAL STRING { 
+						#ifdef USE_TLS
+									tls_server_domains->tls_ec_curve=$3; 
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}	
+	| TLS_EC_CURVE EQUAL error { yyerror("string value expected"); }
 	| TLS_VERIFY_CLIENT EQUAL NUMBER {
 						#ifdef USE_TLS
 									tls_server_domains->verify_cert=$3;
@@ -1490,8 +1723,15 @@ tls_client_var : TLS_METHOD EQUAL SSLv23 {
 									warn("tls support not compiled in");
 						#endif
 								}
+	| TLS_METHOD EQUAL TLSv1_2 { 
+						#ifdef USE_TLS
+									tls_client_domains->method=TLS_USE_TLSv1_2;
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}
 	| TLS_METHOD EQUAL error {
-						yyerror("SSLv23, SSLv2, SSLv3 or TLSv1 expected"); }
+						yyerror("SSLv23, SSLv2, SSLv3, TLSv1 or TLSv1_2 expected"); }
 	| TLS_CERTIFICATE EQUAL STRING { 
 						#ifdef USE_TLS
 									tls_client_domains->cert_file=$3;
@@ -1518,6 +1758,14 @@ tls_client_var : TLS_METHOD EQUAL SSLv23 {
 						#endif
 								}	
 	| TLS_CA_LIST EQUAL error { yyerror("string value expected"); }
+	| TLS_CA_DIR EQUAL STRING {
+                                                #ifdef USE_TLS
+                                                                        tls_client_domains->ca_directory=$3;
+                                                #else
+                                                                        warn("tls support not compiled in");
+                                                #endif
+                                                                }
+        | TLS_CA_DIR EQUAL error { yyerror("string value expected"); }
 	| TLS_CIPHERS_LIST EQUAL STRING { 
 						#ifdef USE_TLS
 									tls_client_domains->ciphers_list=$3;
@@ -1526,6 +1774,22 @@ tls_client_var : TLS_METHOD EQUAL SSLv23 {
 						#endif
 								}
 	| TLS_CIPHERS_LIST EQUAL error { yyerror("string value expected"); }
+	| TLS_DH_PARAMS EQUAL STRING { 
+						#ifdef USE_TLS
+									tls_client_domains->tmp_dh_file=$3; 
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}	
+	| TLS_DH_PARAMS EQUAL error { yyerror("string value expected"); }
+	| TLS_EC_CURVE EQUAL STRING { 
+						#ifdef USE_TLS
+									tls_client_domains->tls_ec_curve=$3; 
+						#else
+									warn("tls support not compiled in");
+						#endif
+								}	
+	| TLS_EC_CURVE EQUAL error { yyerror("string value expected"); }
 	| TLS_VERIFY_SERVER EQUAL NUMBER {
 						#ifdef USE_TLS
 									tls_client_domains->verify_cert=$3;
@@ -1553,7 +1817,7 @@ route_name:  ID {
 
 route_stm:  ROUTE LBRACE actions RBRACE {
 						if (rlist[DEFAULT_RT].a!=0) {
-							yyerror("overwritting default "
+							yyerror("overwriting default "
 								"request routing table");
 							YYABORT;
 						}
@@ -1563,7 +1827,7 @@ route_stm:  ROUTE LBRACE actions RBRACE {
 						if ( strtol($3,&tmp,10)==0 && *tmp==0) {
 							/* route[0] detected */
 							if (rlist[DEFAULT_RT].a!=0) {
-								yyerror("overwritting(2) default "
+								yyerror("overwriting(2) default "
 									"request routing table");
 								YYABORT;
 							}
@@ -1588,7 +1852,7 @@ failure_route_stm: ROUTE_FAILURE LBRACK route_name RBRACK LBRACE actions RBRACE 
 
 onreply_route_stm: ROUTE_ONREPLY LBRACE actions RBRACE {
 						if (onreply_rlist[DEFAULT_RT].a!=0) {
-							yyerror("overwritting default "
+							yyerror("overwriting default "
 								"onreply routing table");
 							YYABORT;
 						}
@@ -1614,7 +1878,7 @@ branch_route_stm: ROUTE_BRANCH LBRACK route_name RBRACK LBRACE actions RBRACE {
 
 error_route_stm:  ROUTE_ERROR LBRACE actions RBRACE {
 						if (error_rlist.a!=0) {
-							yyerror("overwritting default "
+							yyerror("overwriting default "
 								"error routing table");
 							YYABORT;
 						}
@@ -2019,6 +2283,7 @@ actions:	actions action	{$$=append_action($1, $2); }
 action:		cmd SEMICOLON {$$=$1;}
 		| if_cmd {$$=$1;}
 		| while_cmd { $$=$1;}
+		| foreach_cmd { $$=$1;}
 		| switch_cmd {$$=$1;}
 		| assign_cmd SEMICOLON {$$=$1;}
 		| SEMICOLON /* null action */ {$$=0;}
@@ -2049,6 +2314,23 @@ while_cmd:		WHILE exp stm				{ mk_action2( $$, WHILE_T,
 													 $2,
 													 $3);
 									}
+	;
+
+foreach_cmd:	FOR LPAREN script_var IN script_var RPAREN stm {
+					if ($3->type != PVT_SCRIPTVAR &&
+					    $3->type != PVT_AVP) {
+						yyerror("\nfor-each statement: only \"var\" "
+					            "and \"avp\" iterators are supported");
+					}
+
+					mk_action3( $$, FOR_EACH_T,
+					            SCRIPTVAR_ST,
+					            SCRIPTVAR_ST,
+					            ACTIONS_ST,
+					            $3,
+					            $5,
+					            $7);
+					}
 	;
 
 switch_cmd:		SWITCH LPAREN script_var RPAREN LBRACE switch_stm	RBRACE	{
@@ -2166,10 +2448,37 @@ module_func_param: STRING {
 										elems[$1+1].u.data = $3;
 										$$=$1+1;
 										}
+		| COMMA {
+										elems[1].type = NULLV_ST;
+										elems[1].u.data = NULL;
+										elems[2].type = NULLV_ST;
+										elems[2].u.data = NULL;
+										$$=2;
+										}
+		| COMMA STRING {
+										elems[1].type = NULLV_ST;
+										elems[1].u.data = NULL;
+										elems[2].type = STRING_ST;
+										elems[2].u.data = $2;
+										$$=2;
+										}
+		| module_func_param COMMA {
+										if ($1+1>=MAX_ACTION_ELEMS) {
+										 	   yyerror("too many arguments in function\n");
+										 	   $$=0;
+										}
+										elems[$1+1].type = NULLV_ST;
+										elems[$1+1].u.data = NULL;
+										$$=$1+1;
+										}
 		| NUMBER {
 										$$=0;
 										yyerror("numbers used as parameters - they should be quoted");
 										}
+		| COMMA NUMBER {
+									   $$=0;
+									   yyerror("numbers used as parameters - they should be quoted");
+									   }
 		| module_func_param COMMA NUMBER {
 										$$=0;
 										yyerror("numbers used as parameters - they should be quoted");
@@ -2571,23 +2880,24 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 														"string expected"); }
 		| SET_ADV_ADDRESS error {$$=0; yyerror("missing '(' or ')' ?"); }
 		| SET_ADV_PORT LPAREN NUMBER RPAREN {
-								$$=0;
-								tmp=int2str($3, &i_tmp);
-								if ((str_tmp=pkg_malloc(sizeof(str)))==0){
+								tstr.s = int2str($3, &tstr.len);
+								if (!(tmp = pkg_malloc(tstr.len + 1))) {
 										LM_CRIT("cfg. parser: out of memory.\n");
-								}else{
-									if ((str_tmp->s=pkg_malloc(i_tmp))==0){
-										LM_CRIT("cfg. parser: out of memory.\n");
-									}else{
-										memcpy(str_tmp->s, tmp, i_tmp);
-										str_tmp->len=i_tmp;
-										mk_action2( $$, SET_ADV_PORT_T, STR_ST,
-													0, str_tmp, 0);
-									}
+										$$ = 0;
+								} else {
+									memcpy(tmp, tstr.s, tstr.len);
+									tmp[tstr.len] = '\0';
+									mk_action2($$, SET_ADV_PORT_T, STR_ST,
+											   0, tmp, 0);
 								}
 								            }
-		| SET_ADV_PORT LPAREN error RPAREN { $$=0; yyerror("bad argument, "
-								"string expected"); }
+		| SET_ADV_PORT LPAREN STRING RPAREN {
+								mk_action2($$, SET_ADV_PORT_T,
+										   STR_ST, NOSUBTYPE,
+										   $3, NULL);
+								}
+		| SET_ADV_PORT LPAREN error RPAREN { $$=0; yyerror("bad argument "
+						"(string or integer expected)"); }
 		| SET_ADV_PORT  error {$$=0; yyerror("missing '(' or ')' ?"); }
 		| FORCE_SEND_SOCKET LPAREN phostport RPAREN {
 								mk_action2( $$, FORCE_SEND_SOCKET_T,
@@ -2647,7 +2957,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.data = $7; 
 								elems[3].type = NUMBER_ST; 
 								elems[3].u.number = $9;
-								$$ = mk_action(CACHE_STORE_T, 4, elems, line); 
+								mk_action_($$, CACHE_STORE_T, 4, elems);
 							}
 		| CACHE_STORE LPAREN STRING COMMA STRING COMMA STRING COMMA script_var
 								RPAREN { 
@@ -2659,7 +2969,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.data = $7; 
 								elems[3].type = SCRIPTVAR_ST; 
 								elems[3].u.data = $9;
-								$$ = mk_action(CACHE_STORE_T, 4, elems, line); 
+								mk_action_($$, CACHE_STORE_T, 4, elems);
 							}
 
 		| CACHE_REMOVE LPAREN STRING COMMA STRING RPAREN { 
@@ -2696,7 +3006,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.number = $7;
 								elems[3].type = NUMBER_ST;
 								elems[3].u.number = $9;
-								$$ = mk_action(CACHE_ADD_T, 4, elems, line); 
+								mk_action_($$, CACHE_ADD_T, 4, elems);
 							}
 		| CACHE_ADD LPAREN STRING COMMA STRING COMMA script_var COMMA NUMBER RPAREN { 
 								elems[0].type = STR_ST; 
@@ -2707,7 +3017,33 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.data = $7;
 								elems[3].type = NUMBER_ST;
 								elems[3].u.number = $9;
-								$$ = mk_action(CACHE_ADD_T, 4, elems, line); 
+								mk_action_($$, CACHE_ADD_T, 4, elems);
+							}
+		| CACHE_ADD LPAREN STRING COMMA STRING COMMA NUMBER COMMA NUMBER COMMA script_var RPAREN { 
+								elems[0].type = STR_ST; 
+								elems[0].u.data = $3; 
+								elems[1].type = STR_ST; 
+								elems[1].u.data = $5; 
+								elems[2].type = NUMBER_ST;
+								elems[2].u.number = $7;
+								elems[3].type = NUMBER_ST;
+								elems[3].u.number = $9;
+								elems[4].type = SCRIPTVAR_ST;
+								elems[4].u.data = $11;
+								mk_action_($$, CACHE_ADD_T, 5, elems);
+							}
+		| CACHE_ADD LPAREN STRING COMMA STRING COMMA script_var COMMA NUMBER COMMA script_var RPAREN { 
+								elems[0].type = STR_ST; 
+								elems[0].u.data = $3; 
+								elems[1].type = STR_ST; 
+								elems[1].u.data = $5; 
+								elems[2].type = SCRIPTVAR_ST;
+								elems[2].u.data = $7;
+								elems[3].type = NUMBER_ST;
+								elems[3].u.number = $9;
+								elems[4].type = SCRIPTVAR_ST;
+								elems[4].u.data = $11;
+								mk_action_($$, CACHE_ADD_T, 5, elems);
 							}
 		| CACHE_SUB LPAREN STRING COMMA STRING COMMA NUMBER COMMA NUMBER RPAREN { 
 								elems[0].type = STR_ST; 
@@ -2718,7 +3054,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.number = $7;
 								elems[3].type = NUMBER_ST;
 								elems[3].u.number = $9;
-								$$ = mk_action(CACHE_SUB_T, 4, elems, line); 
+								mk_action_($$, CACHE_SUB_T, 4, elems);
 							}
 		| CACHE_SUB LPAREN STRING COMMA STRING COMMA script_var COMMA NUMBER RPAREN { 
 								elems[0].type = STR_ST; 
@@ -2729,7 +3065,33 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[2].u.data = $7;
 								elems[3].type = NUMBER_ST;
 								elems[3].u.number = $9;
-								$$ = mk_action(CACHE_SUB_T, 4, elems, line); 
+								mk_action_($$, CACHE_SUB_T, 4, elems);
+							}
+		| CACHE_SUB LPAREN STRING COMMA STRING COMMA NUMBER COMMA NUMBER COMMA script_var RPAREN { 
+								elems[0].type = STR_ST; 
+								elems[0].u.data = $3; 
+								elems[1].type = STR_ST; 
+								elems[1].u.data = $5; 
+								elems[2].type = NUMBER_ST;
+								elems[2].u.number = $7;
+								elems[3].type = NUMBER_ST;
+								elems[3].u.number = $9;
+								elems[4].type = SCRIPTVAR_ST;
+								elems[4].u.data = $11;
+								mk_action_($$, CACHE_SUB_T, 5, elems);
+							}
+		| CACHE_SUB LPAREN STRING COMMA STRING COMMA script_var COMMA NUMBER COMMA script_var RPAREN { 
+								elems[0].type = STR_ST; 
+								elems[0].u.data = $3; 
+								elems[1].type = STR_ST; 
+								elems[1].u.data = $5; 
+								elems[2].type = SCRIPTVAR_ST;
+								elems[2].u.data = $7;
+								elems[3].type = NUMBER_ST;
+								elems[3].u.number = $9;
+								elems[4].type = SCRIPTVAR_ST;
+								elems[4].u.data = $11;
+								mk_action_($$, CACHE_SUB_T, 5, elems);
 							}
 		| CACHE_RAW_QUERY LPAREN STRING COMMA STRING COMMA STRING RPAREN { 
 								elems[0].type = STR_ST; 
@@ -2738,14 +3100,14 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 								elems[1].u.data = $5; 
 								elems[2].type = STR_ST; 
 								elems[2].u.data = $7;
-								$$ = mk_action(CACHE_RAW_QUERY_T, 3, elems, line); 
+								mk_action_($$, CACHE_RAW_QUERY_T, 3, elems);
 							}
 		| CACHE_RAW_QUERY LPAREN STRING COMMA STRING RPAREN { 
 								elems[0].type = STR_ST; 
 								elems[0].u.data = $3; 
 								elems[1].type = STR_ST; 
 								elems[1].u.data = $5; 
-								$$ = mk_action(CACHE_RAW_QUERY_T, 2, elems, line); 
+								mk_action_($$, CACHE_RAW_QUERY_T, 2, elems);
 							}
 		| ID LPAREN RPAREN		{
 						 			cmd_tmp=(void*)find_cmd_export_t($1, 0, rt);
@@ -2761,7 +3123,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 									}else{
 										elems[0].type = CMD_ST;
 										elems[0].u.data = cmd_tmp;
-										$$ = mk_action(MODULE_T, 1, elems, line);
+										mk_action_($$, MODULE_T, 1, elems);
 									}
 								}
 		| ID LPAREN module_func_param RPAREN		{
@@ -2778,7 +3140,7 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 									}else{
 										elems[0].type = CMD_ST;
 										elems[0].u.data = cmd_tmp;
-										$$ = mk_action(MODULE_T, $3+1, elems, line);
+										mk_action_($$, MODULE_T, $3+1, elems);
 									}
 								}
 		| ID LPAREN error RPAREN { $$=0; yyerrorf("bad arguments for "
@@ -2814,13 +3176,13 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 				elems[4].u.data = $11;
 				elems[5].type = SCRIPTVAR_ST; 
 				elems[5].u.data = $13;
-				$$ = mk_action(CONSTRUCT_URI_T,6,elems,line); }
+				mk_action_($$, CONSTRUCT_URI_T,6,elems); }
 		| GET_TIMESTAMP LPAREN script_var COMMA script_var RPAREN {
 				elems[0].type = SCRIPTVAR_ST;
 				elems[0].u.data = $3;
 				elems[1].type = SCRIPTVAR_ST;
 				elems[1].u.data = $5; 
-				$$ = mk_action(GET_TIMESTAMP_T,2,elems,line); }
+				mk_action_($$, GET_TIMESTAMP_T,2,elems); }
 		| SCRIPT_TRACE LPAREN RPAREN {
 				mk_action2($$, SCRIPT_TRACE_T, 0, 0, 0, 0); }
 		| SCRIPT_TRACE LPAREN NUMBER COMMA STRING RPAREN {
@@ -2844,13 +3206,6 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 
 
 %%
-
-extern int column;
-extern int startcolumn;
-extern char *finame;
-
-#define get_cfg_file_name \
-	((finame) ? finame : cfg_file ? cfg_file : "default")
 
 static inline void warn(char* s)
 {
@@ -2887,13 +3242,15 @@ static struct socket_id* mk_listen_id(char* host, int proto, int port)
 	if (l==0){
 		LM_CRIT("cfg. parser: out of memory.\n");
 	}else{
-		l->name=host;
-		l->port=port;
-		l->proto=proto;
-		l->adv_name=NULL;
-		l->adv_port=0;
-		l->next=0;
+		l->name     = host;
+		l->adv_name = NULL;
+		l->adv_port = 0;
+		l->proto    = proto;
+		l->port     = port;
+		l->children = 0;
+		l->next     = NULL;
 	}
+
 	return l;
 }
 

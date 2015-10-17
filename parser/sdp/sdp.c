@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
@@ -57,7 +57,7 @@ static inline int new_sdp(struct sip_msg* _m)
 		return -1;
 	}
 	memset( sdp, 0, sizeof(sdp_info_t));
-		
+
 	_m->sdp = sdp;
 
 	return 0;
@@ -299,7 +299,7 @@ sdp_stream_cell_t* get_sdp_stream(struct sip_msg* _m, int session_num, int strea
 {
 	if (_m->sdp == NULL) return NULL;
 	return get_sdp_stream_sdp(_m->sdp, session_num, stream_num);
-      
+
 }
 
 
@@ -350,7 +350,7 @@ sdp_payload_attr_t* get_sdp_payload4index(sdp_stream_cell_t *stream, int index)
 /**
  * SDP parser method.
  */
-static int parse_sdp_session(str *sdp_body, int session_num, str *cnt_disp, sdp_info_t* _sdp)
+int parse_sdp_session(str *sdp_body, int session_num, str *cnt_disp, sdp_info_t* _sdp)
 {
 	str body = *sdp_body;
 	str sdp_ip = {NULL,0};
@@ -436,7 +436,7 @@ static int parse_sdp_session(str *sdp_body, int session_num, str *cnt_disp, sdp_
 	m2p = m1p;
 	stream_num = 0;
 	for (;;) {
-		m1p = m2p; 
+		m1p = m2p;
 		if (m1p == NULL || m1p >= bodylimit)
 			break;
 		m2p = find_next_sdp_line(m1p, bodylimit, 'm', bodylimit);
@@ -749,14 +749,20 @@ int parse_sdp(struct sip_msg* _m)
 /**
  * Free all memory.
  */
-void free_sdp(sdp_info_t** _sdp)
+void free_sdp(sdp_info_t** sdp)
 {
-	sdp_info_t *sdp = *_sdp;
+	__free_sdp(*sdp);
+	pkg_free(*sdp);
+	*sdp = NULL;
+}
+
+void __free_sdp(sdp_info_t* sdp)
+{
 	sdp_session_cell_t *session, *l_session;
 	sdp_stream_cell_t *stream, *l_stream;
 	sdp_payload_attr_t *payload, *l_payload;
 
-	LM_DBG("_sdp = %p\n", _sdp);
+	LM_DBG("sdp = %p\n", sdp);
 	if (sdp == NULL) return;
 	LM_DBG("sdp = %p\n", sdp);
 	session = sdp->sessions;
@@ -781,10 +787,7 @@ void free_sdp(sdp_info_t** _sdp)
 		}
 		pkg_free(l_session);
 	}
-	pkg_free(sdp);
-	*_sdp = NULL;
 }
-
 
 void print_sdp_stream(sdp_stream_cell_t *stream, int log_level)
 {

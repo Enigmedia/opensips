@@ -1,5 +1,5 @@
-/* 
- * $Id$ 
+/*
+ * $Id$
  *
  * Copyright (C) 2001-2003 FhG Fokus
  *
@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -26,11 +26,11 @@
  * 2004-06-07 updated to the new DB api (andrei)
  * 2004-08-23  hash function changed to process characters as unsigned
  *             -> no negative results occur (jku)
- *   
+ *
  */
 
 /*! \file
- *  \brief USRLOC - 
+ *  \brief USRLOC -
  *  \ingroup usrloc
  */
 
@@ -45,6 +45,7 @@
 #include "../../hash_func.h"
 #include "ul_mod.h"            /* usrloc module parameters */
 #include "utime.h"
+#include "ureplication.h"
 
 
 
@@ -62,7 +63,7 @@ int new_udomain(str* _n, int _s, udomain_t** _d)
 #ifdef STATISTICS
 	char *name;
 #endif
-	
+
 	/* Must be always in shared memory, since
 	 * the cache is accessed from timer which
 	 * lives in a separate process
@@ -73,7 +74,7 @@ int new_udomain(str* _n, int _s, udomain_t** _d)
 		goto error0;
 	}
 	memset(*_d, 0, sizeof(udomain_t));
-	
+
 	(*_d)->table = (hslot_t*)shm_malloc(sizeof(hslot_t) * _s);
 	if (!(*_d)->table) {
 		LM_ERR("no memory left 2\n");
@@ -81,7 +82,7 @@ int new_udomain(str* _n, int _s, udomain_t** _d)
 	}
 
 	(*_d)->name = _n;
-	
+
 	for(i = 0; i < _s; i++) {
 		if (init_slot(*_d, &((*_d)->table[i]), i) < 0) {
 			LM_ERR("initializing hash table failed\n");
@@ -120,6 +121,64 @@ error0:
 }
 
 
+static event_id_t ei_ins_id = EVI_ERROR;
+static event_id_t ei_del_id = EVI_ERROR;
+static str ei_ins_name = str_init("E_UL_AOR_INSERT");
+static str ei_del_name = str_init("E_UL_AOR_DELETE");
+static str ei_aor_name = str_init("aor");
+static evi_params_p ul_event_params;
+static evi_param_p ul_aor_param;
+
+/*! \brief
+ * Initialize event structures
+ */
+int ul_event_init(void)
+{
+	ei_ins_id = evi_publish_event(ei_ins_name);
+	if (ei_ins_id == EVI_ERROR) {
+		LM_ERR("cannot register insert event\n");
+		return -1;
+	}
+
+	ei_del_id = evi_publish_event(ei_del_name);
+	if (ei_del_id == EVI_ERROR) {
+		LM_ERR("cannot register delete event\n");
+		return -1;
+	}
+
+	ul_event_params = pkg_malloc(sizeof(evi_params_t));
+	if (!ul_event_params) {
+		LM_ERR("no more pkg memory\n");
+		return -1;
+	}
+	memset(ul_event_params, 0, sizeof(evi_params_t));
+	ul_aor_param = evi_param_create(ul_event_params, &ei_aor_name);
+	if (!ul_aor_param) {
+		LM_ERR("cannot create AOR parameter\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+/*! \brief
+ * Raise an event when an AOR is inserted/deleted
+ */
+static void ul_raise_event(event_id_t _e, struct urecord* _r)
+{
+	if (_e == EVI_ERROR) {
+		LM_ERR("event not yet registered %d\n", _e);
+		return;
+	}
+	if (evi_param_set_str(ul_aor_param, &_r->aor) < 0) {
+		LM_ERR("cannot set AOR parameter\n");
+		return;
+	}
+	if (evi_raise_event(_e, ul_event_params) < 0)
+		LM_ERR("cannot raise event\n");
+}
+
+
 /*! \brief
  * Free all memory allocated for
  * the domain
@@ -127,7 +186,7 @@ error0:
 void free_udomain(udomain_t* _d)
 {
 	int i;
-	
+
 	if (_d->table) {
 		for(i = 0; i < _d->size; i++) {
 			lock_ulslot(_d, i);
@@ -183,9 +242,9 @@ void print_udomain(FILE* _f, udomain_t* _d)
 			iterator_is_valid(&it);
 			iterator_next(&it) )
 			print_urecord(_f, (struct urecord *)*iterator_val(&it));
-		
+
 	}
-	
+
 	fprintf(_f, "\nMax slot: %d (%d/%d)\n", max, slot, n);
 	fprintf(_f, "\n---/Domain---\n");
 }
@@ -198,7 +257,7 @@ void print_udomain(FILE* _f, udomain_t* _d)
 static inline ucontact_info_t* dbrow2info( db_val_t *vals, str *contact)
 {
 	static ucontact_info_t ci;
-	static str callid, ua, received, host, path,instance;
+	static str callid, ua, received, host, path, instance, attr, flags;
 	int port, proto;
 	char *p;
 
@@ -243,11 +302,15 @@ static inline ucontact_info_t* dbrow2info( db_val_t *vals, str *contact)
 	}
 	ci.flags  = VAL_BITMAP(vals+5);
 
-	if (VAL_NULL(vals+6)) {
-		LM_CRIT("empty cflag\n");
-		return 0;
+	if (!VAL_NULL(vals+6)) {
+		flags.s   = (char *)VAL_STRING(vals+6);
+		flags.len = strlen(flags.s);
+		LM_DBG("flag str: '%.*s'\n", flags.len, flags.s);
+
+		ci.cflags = flag_list_to_bitmask(&flags, FLAG_TYPE_BRANCH, FLAG_DELIM);
+
+		LM_DBG("set flags: %d\n", ci.cflags);
 	}
-	ci.cflags  = VAL_BITMAP(vals+6);
 
 	ua.s  = (char*)VAL_STRING(vals+7);
 	if (VAL_NULL(vals+7) || !ua.s || !ua.s[0]) {
@@ -266,7 +329,7 @@ static inline ucontact_info_t* dbrow2info( db_val_t *vals, str *contact)
 		received.len = strlen(received.s);
 	}
 	ci.received = received;
-	
+
 	path.s  = (char*)VAL_STRING(vals+9);
 		if (VAL_NULL(vals+9) || !path.s || !path.s[0]) {
 			path.len = 0;
@@ -281,7 +344,7 @@ static inline ucontact_info_t* dbrow2info( db_val_t *vals, str *contact)
 	if (VAL_NULL(vals+10) || p==0 || p[0]==0){
 		ci.sock = 0;
 	} else {
-		if (parse_phostport( p, strlen(p), &host.s, &host.len, 
+		if (parse_phostport( p, strlen(p), &host.s, &host.len,
 		&port, &proto)!=0) {
 			LM_ERR("bad socket <%s>\n", p);
 			return 0;
@@ -313,6 +376,15 @@ static inline ucontact_info_t* dbrow2info( db_val_t *vals, str *contact)
 	}
 	ci.instance = instance;
 
+	attr.s = (char*)VAL_STRING(vals+14);
+	if (VAL_NULL(vals+14) || !attr.s) {
+		attr.s = NULL;
+		attr.len = 0;
+	} else
+		attr.len  = strlen(attr.s);
+
+	ci.attr = &attr;
+
 	return &ci;
 }
 
@@ -324,7 +396,7 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 	char uri[MAX_URI_SIZE];
 	ucontact_info_t *ci;
 	db_row_t *row;
-	db_key_t columns[16];
+	db_key_t columns[17];
 	db_res_t* res = NULL;
 	str user, contact;
 	char* domain;
@@ -350,7 +422,8 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 	columns[12] = &methods_col;
 	columns[13] = &last_mod_col;
 	columns[14] = &sip_instance_col;
-	columns[15] = &domain_col;
+	columns[15] = &attr_col;
+	columns[16] = &domain_col;
 
 	if (ul_dbf.use_table(_c, _d->name) < 0) {
 		LM_ERR("sql use_table failed\n");
@@ -362,20 +435,20 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 #endif
 
 	if (DB_CAPABILITY(ul_dbf, DB_CAP_FETCH)) {
-		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(16):(15), 0,
+		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(17):(16), 0,
 		0) < 0) {
 			LM_ERR("db_query (1) failed\n");
 			return -1;
 		}
 		no_rows = estimate_available_rows( 32+64+4+8+128+8+4+4+64
-			+32+128+16+8+8+255+32, 16);
+			+32+128+16+8+8+255+32+255, 17);
 		if (no_rows==0) no_rows = 10;
 		if(ul_dbf.fetch_result(_c, &res, no_rows)<0) {
 			LM_ERR("fetching rows failed\n");
 			return -1;
 		}
 	} else {
-		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(16):(15), 0,
+		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(17):(16), 0,
 		&res) < 0) {
 			LM_ERR("db_query failed\n");
 			return -1;
@@ -411,8 +484,8 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 			}
 
 			if (use_domain) {
-				domain = (char*)VAL_STRING(ROW_VALUES(row) + 15);
-				if (VAL_NULL(ROW_VALUES(row)+15) || domain==0 || domain[0]==0){
+				domain = (char*)VAL_STRING(ROW_VALUES(row) + 16);
+				if (VAL_NULL(ROW_VALUES(row)+16) || domain==0 || domain[0]==0){
 					LM_CRIT("empty domain record for user %.*s...skipping\n",
 							user.len, user.s);
 					continue;
@@ -428,7 +501,7 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 				}
 			}
 
-		
+
 			lock_udomain(_d, &user);
 			if (get_urecord(_d, &user, &r) > 0) {
 				if (mem_insert_urecord(_d, &user, &r) < 0) {
@@ -483,7 +556,7 @@ urecord_t* db_load_urecord(db_con_t* _c, udomain_t* _d, str *_aor)
 {
 	/*static db_ps_t my_ps = NULL;*/
 	ucontact_info_t *ci;
-	db_key_t columns[14];
+	db_key_t columns[15];
 	db_key_t keys[2];
 	db_val_t vals[2];
 	db_key_t order = &q_col;
@@ -512,6 +585,7 @@ urecord_t* db_load_urecord(db_con_t* _c, udomain_t* _d, str *_aor)
 	columns[11] = &methods_col;
 	columns[12] = &last_mod_col;
 	columns[13] = &sip_instance_col;
+	columns[14] = &attr_col;
 
 	if (desc_time_order)
 		order = &last_mod_col;
@@ -542,7 +616,7 @@ urecord_t* db_load_urecord(db_con_t* _c, udomain_t* _d, str *_aor)
 
 	/* CON_PS_REFERENCE(_c) = &my_ps; - this is still dangerous with STMT */
 
-	if (ul_dbf.query(_c, keys, 0, vals, columns, (use_domain)?2:1, 14, order,
+	if (ul_dbf.query(_c, keys, 0, vals, columns, (use_domain)?2:1, 15, order,
 				&res) < 0) {
 		LM_ERR("db_query failed\n");
 		return 0;
@@ -563,7 +637,7 @@ urecord_t* db_load_urecord(db_con_t* _c, udomain_t* _d, str *_aor)
 					_aor->len, _aor->s, _d->name->s);
 			continue;
 		}
-		
+
 		if ( r==0 )
 			get_static_urecord( _d, _aor, &r);
 
@@ -636,7 +710,7 @@ int testdb_udomain(db_con_t* con, udomain_t* d)
 	VAL_TYPE(val) = DB_STRING;
 	VAL_NULL(val) = 0;
 	VAL_STRING(val) = "dummy_user";
-	
+
 	if (ul_dbf.query( con, key, 0, val, col, 1, 1, 0, &res) < 0) {
 		LM_ERR("failure in db_query\n");
 		return -1;
@@ -653,7 +727,7 @@ int testdb_udomain(db_con_t* con, udomain_t* d)
 int mem_insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
 {
 	int sl;
-	
+
 	if (new_urecord(_d->name, _aor, _r) < 0) {
 		LM_ERR("creating urecord failed\n");
 		return -1;
@@ -669,6 +743,7 @@ int mem_insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
 		return -1;
 	}
 
+	ul_raise_event(ei_ins_id, *_r);
 	update_stat( _d->users, 1);
 	return 0;
 }
@@ -679,6 +754,7 @@ int mem_insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
  */
 void mem_delete_urecord(udomain_t* _d, struct urecord* _r)
 {
+	ul_raise_event(ei_del_id, _r);
 	slot_rem(_r->slot, _r);
 	free_urecord(_r);
 	update_stat( _d->users, -1);
@@ -717,7 +793,7 @@ int mem_timer_udomain(udomain_t* _d)
 				unlock_ulslot(_d, i);
 				return -1;
 			}
-			
+
 			if (ret)
 				flush=1;
 
@@ -728,7 +804,7 @@ int mem_timer_udomain(udomain_t* _d)
 				mem_delete_urecord(_d,ptr);
 			}
 		}
-		
+
 		unlock_ulslot(_d, i);
 	}
 
@@ -813,16 +889,21 @@ void unlock_ulslot(udomain_t* _d, int i)
 /*! \brief
  * Create and insert a new record
  */
-int insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
+int insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r,
+                   char is_replicated)
 {
 	if (db_mode!=DB_ONLY) {
 		if (mem_insert_urecord(_d, _aor, _r) < 0) {
 			LM_ERR("inserting record failed\n");
 			return -1;
 		}
+
+		if (!is_replicated && replication_dests)
+			replicate_urecord_insert(*_r);
 	} else {
 		get_static_urecord( _d, _aor, _r);
 	}
+
 	return 0;
 }
 
@@ -841,7 +922,7 @@ int get_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
 		/* search in cache */
 		aorhash = core_hash(_aor, 0, 0);
 		sl = aorhash&(_d->size-1);
-		
+
 
 		dest = map_find(_d->table[sl].records, *_aor);
 
@@ -852,7 +933,7 @@ int get_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
 
 		return 0;
 
-		
+
 	} else {
 		/* search in DB */
 		r = db_load_urecord( ul_dbh, _d, _aor);
@@ -869,7 +950,8 @@ int get_urecord(udomain_t* _d, str* _aor, struct urecord** _r)
 /*! \brief
  * Delete a urecord from domain
  */
-int delete_urecord(udomain_t* _d, str* _aor, struct urecord* _r)
+int delete_urecord(udomain_t* _d, str* _aor, struct urecord* _r,
+                   char is_replicated)
 {
 	struct ucontact* c, *t;
 
@@ -890,16 +972,19 @@ int delete_urecord(udomain_t* _d, str* _aor, struct urecord* _r)
 		}
 	}
 
+	if (!is_replicated && replication_dests)
+		replicate_urecord_delete(_r);
+
 	c = _r->contacts;
 	while(c) {
 		t = c;
 		c = c->next;
-		if (delete_ucontact(_r, t) < 0) {
+		if (delete_ucontact(_r, t, is_replicated) < 0) {
 			LM_ERR("deleting contact failed\n");
 			return -1;
 		}
 	}
-	release_urecord(_r);
+	release_urecord(_r, is_replicated);
 	return 0;
 }
 

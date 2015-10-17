@@ -74,8 +74,8 @@ loadmodule "sl.so"
 
 #### Transaction Module
 loadmodule "tm.so"
-modparam("tm", "fr_timer", 5)
-modparam("tm", "fr_inv_timer", 30)
+modparam("tm", "fr_timeout", 5)
+modparam("tm", "fr_inv_timeout", 30)
 modparam("tm", "restart_fr_on_each_reply", 0)
 modparam("tm", "onreply_avp_mode", 1)
 
@@ -172,9 +172,10 @@ modparam("auth_db|usrloc|uri", "use_domain", 1)
 ', `')
 
 ifelse(USE_PRESENCE,`yes',`#### PRESENCE modules
+loadmodule "xcap.so"
 loadmodule "presence.so"
 loadmodule "presence_xml.so"
-modparam("presence|presence_xml", "db_url",
+modparam("xcap|presence", "db_url",
 	"mysql://opensips:opensipsrw@localhost/opensips") # CUSTOMIZE ME
 modparam("presence_xml", "force_active", 1)
 modparam("presence", "server_address", "sip:127.0.0.1:5060") # CUSTOMIZE ME

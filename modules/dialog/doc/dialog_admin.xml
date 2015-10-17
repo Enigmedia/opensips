@@ -34,9 +34,7 @@
 	received. In case of no <quote>BYE</quote>, the dialog lifetime is 
 	controlled via the default timeout (see <quote>default_timeout</quote>
 	- <xref linkend="default-timeout-id"/>) and custom timeout (see 
-	<quote>timeout_avp</quote> - <xref linkend="timeout-avp-id"/>). The 
-	dialog timeout is reset each time a sequential (except ACKs) request 
-	passes.
+	<quote>$DLG_timeout</quote> - <xref linkend="timeout-pvar-id"/>).
 	</para>
 	</section>
 
@@ -88,6 +86,32 @@
 	<emphasis>'/s'</emphasis> suffix to the name of the profile in the
 	<emphasis>profiles_with_value</emphasis> or
 	<emphasis>profiles_no_value</emphasis> parameters.
+	</para>
+	</section>
+
+	<section>
+	<title>Dialog replication</title>
+	<para>
+	<emphasis role='bold'>Dialog replication</emphasis> is a mechanism used to
+	mirror all dialog changes taking place in one OpenSIPS instance to one or
+	more other different instances. The logic is simplified by using the core
+	<emphasis>Binary Internal Interface</emphasis> to build and send the
+	replication-related UDP packets.
+	</para>
+	<para>
+		The feature is especially useful when dealing with very large systems,
+	where failover through a database backend is no longer feasible, due to the
+	high amount of time required for the backup instance to load the dialog
+	information stored in a typical <emphasis>dialog</emphasis> table by the
+	crashed instance.
+	</para>
+	<para>
+		Configuring both receival and sending of dialog replication packets is
+	trivial and can be done by using the
+	<emphasis role='bold'>accept_replicated_dialogs</emphasis> and
+	<emphasis role='bold'>replicate_dialogs_to</emphasis> parameters of the
+	module. In addition to this, the module also exports several statistics
+	regarding the number of replication packets sent/received.
 	</para>
 	</section>
 
@@ -228,33 +252,6 @@ modparam("dialog", "rr_param", "xyz")
 		</example>
 	</section>
 
-	<section id="timeout-avp-id">
-		<title><varname>timeout_avp</varname> (string)</title>
-		<para>
-		The specification of an AVP to contain a custom timeout (in seconds)
-		for the dialog. It may be used only in a request 
-		(initial or sequential) context.
-		</para>
-		<para>
-		<emphasis>
-			Default value is <quote>none</quote>.
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>timeout_avp</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("dialog", "timeout_avp", "$avp(10)")
-...
-</programlisting>
-		</example>
-		<para>
-		<emphasis>
-			Make sure you call this before <function>loose_route()</function>.
-		</emphasis>
-		</para>
-	</section>
-
 	<section id="default-timeout-id">
 		<title><varname>default_timeout</varname> (integer)</title>
 		<para>
@@ -374,12 +371,12 @@ modparam("dialog", "db_url", "&exampledb;")
 			</para></listitem>
 			<listitem><para>
 				<emphasis>1 - REALTIME</emphasis> - any dialog information 
-				changes will be reflected into the database immediatly.
+				changes will be reflected into the database immediately.
 			</para></listitem>
 			<listitem><para>
 				<emphasis>2 - DELAYED</emphasis> - the dialog information 
-				changes will be flushed into DB periodically, based on a
-				timre routine.
+				changes will be flushed into the DB periodically, based on a
+				timer routine.
 			</para></listitem>
 			<listitem><para>
 				<emphasis>3 - SHUTDOWN</emphasis> - the dialog information 
@@ -405,7 +402,7 @@ modparam("dialog", "db_mode", 1)
 		<title><varname>db_update_period</varname> (integer)</title>
 		<para>
 			The interval (seconds) at which to update dialogs' information if you chose to store the dialogs' info at a given interval.
-			A too short interval will generate intensiv database operations, a too large one will not notice short dialogs.
+			A too short interval will generate intensive database operations, a too large one will not notice short dialogs.
 		</para>
 		<para>
 		<emphasis>
@@ -464,7 +461,7 @@ modparam("dialog", "table_name", "my_dialog")
 	</section>
 
 	<section>
-		<title><varname>callid_column</varname> (string)</title>
+		<title><varname>call_id_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the dialogs' callid.
 		</para>
@@ -474,10 +471,10 @@ modparam("dialog", "table_name", "my_dialog")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>callid_column</varname> parameter</title>
+		<title>Set <varname>call_id_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "callid_column", "callid_c_name")
+modparam("dialog", "call_id_column", "callid_c_name")
 ...
 </programlisting>
 		</example>
@@ -568,7 +565,7 @@ modparam("dialog", "to_tag_column", "to_tag_c_name")
 	</section>
 
 	<section>
-		<title><varname>caller_cseq_column</varname> (string)</title>
+		<title><varname>from_cseq_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the cseq from caller
 			side.
@@ -579,17 +576,17 @@ modparam("dialog", "to_tag_column", "to_tag_c_name")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>caller_cseq_column</varname> parameter</title>
+		<title>Set <varname>from_cseq_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "caller_cseq_column", "column_name")
+modparam("dialog", "from_cseq_column", "from_cseq_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 	<section>
-		<title><varname>callee_cseq_column</varname> (string)</title>
+		<title><varname>to_cseq_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the cseq from callee
 			side.
@@ -600,17 +597,17 @@ modparam("dialog", "caller_cseq_column", "column_name")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>callee_cseq_column</varname> parameter</title>
+		<title>Set <varname>to_cseq_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "callee_cseq_column", "column_name")
+modparam("dialog", "to_cseq_column", "to_cseq_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 	<section>
-		<title><varname>caller_route_column</varname> (string)</title>
+		<title><varname>from_route_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the route records from
 			caller side (proxy to caller).
@@ -621,17 +618,17 @@ modparam("dialog", "callee_cseq_column", "column_name")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>caller_route_column</varname> parameter</title>
+		<title>Set <varname>from_route_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "caller_route_column", "column_name")
+modparam("dialog", "from_route_column", "from_route_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 	<section>
-		<title><varname>callee_route_column</varname> (string)</title>
+		<title><varname>to_route_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the route records from
 			callee side (proxy to callee).
@@ -645,35 +642,35 @@ modparam("dialog", "caller_route_column", "column_name")
 		<title>Set <varname>to_route_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "to_route_column", "column_name")
+modparam("dialog", "to_route_column", "to_route_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 	<section>
-		<title><varname>caller_contact_column</varname> (string)</title>
+		<title><varname>from_contact_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the caller's contact 
 			uri.
 		</para>
 		<para>
 		<emphasis>
-			Default value is <quote>from_contact</quote>.
+			Default value is <quote>caller_contact</quote>.
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>caller_contact_column</varname> parameter</title>
+		<title>Set <varname>from_contact_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "caller_contact_column", "column_name")
+modparam("dialog", "from_contact_column", "from_contact_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 	<section>
-		<title><varname>callee_contact_column</varname> (string)</title>
+		<title><varname>to_contact_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the callee's contact 
 			uri.
@@ -684,17 +681,17 @@ modparam("dialog", "caller_contact_column", "column_name")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>callee_contact_column</varname> parameter</title>
+		<title>Set <varname>to_contact_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "callee_contact_column", "column_name")
+modparam("dialog", "to_contact_column", "to_contact_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 <section>
-		<title><varname>caller_sock_column</varname> (string)</title>
+		<title><varname>from_sock_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store the information about 
 			the local interface receiving the traffic from caller.
@@ -705,31 +702,31 @@ modparam("dialog", "callee_contact_column", "column_name")
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>caller_sock_column</varname> parameter</title>
+		<title>Set <varname>from_sock_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "caller_sock_column", "column_name")
+modparam("dialog", "from_sock_column", "from_sock_c_name")
 ...
 </programlisting>
 		</example>
 	</section>
 
 <section>
-		<title><varname>callee_sock_column</varname> (string)</title>
+		<title><varname>to_sock_column</varname> (string)</title>
 		<para>
 			The column's name in the database to store information about the 
 			local interface receiving the traffic from callee.
 		</para>
 		<para>
 		<emphasis>
-			Default value is <quote>callee_contact</quote>.
+			Default value is <quote>callee_sock</quote>.
 		</emphasis>
 		</para>
 		<example>
-		<title>Set <varname>callee_sock_column</varname> parameter</title>
+		<title>Set <varname>to_sock_column</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "callee_sock_column", "column_name")
+modparam("dialog", "to_sock_column", "to_sock_c_name")
 ...
 </programlisting>
 		</example>
@@ -879,6 +876,26 @@ modparam("dialog", "sflags_column", "sflags_c_name")
 	</section>
 
 	<section>
+		<title><varname>flags_column</varname> (string)</title>
+		<para>
+			The column's name in the database to store the dialogs' flags.
+		</para>
+		<para>
+		<emphasis>
+			Default value is <quote>flags</quote>.
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>flags_column</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("dialog", "flags_column", "flags_c_name")
+...
+</programlisting>
+		</example>
+	</section>
+
+	<section>
 		<title><varname>profiles_with_value</varname> (string)</title>
 		<para>
 			List of names for profiles with values.
@@ -943,7 +960,7 @@ modparam("dialog", "db_flush_vals_profiles", 1)
 		<title><varname>own_timer_proc</varname> (int)</title>
 		<para>
 			Whether the dialog timer should be a 
-			sepparate process or if the tasks should be done in the
+			separate process or if the tasks should be done in the
 			global timer process.
 		</para>
 		<para>
@@ -956,7 +973,7 @@ modparam("dialog", "db_flush_vals_profiles", 1)
 		<title>Set <varname>own_timer_proc</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("dialog", "dlg_id_column", 1)
+modparam("dialog", "own_timer_proc", 1)
 ...
 </programlisting>
 		</example>
@@ -1074,7 +1091,7 @@ modparam("dialog", "profile_size_prefix", "dlgs_")
 	<section>
 		<title><varname>profile_timeout</varname> (int)</title>
 		<para>
-			Specifies ho long a dialog profile should be kept in the CacheDB
+			Specifies how long a dialog profile should be kept in the CacheDB
 			until it expires. This is only used when distributed profiles are
 			enabled.
 		</para>
@@ -1093,6 +1110,48 @@ modparam("dialog", "profile_timeout", "43200")
 		</example>
 	</section>
 
+	<section>
+		<title><varname>accept_replicated_dialogs</varname> (int)</title>
+		<para>
+		Registers the <emphasis>dialog</emphasis> module to the &osips; Binary
+		Internal Interface.
+		</para>
+		<para>
+		<emphasis>
+			Default value is 0 (not registered).
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>accept_replicated_dialogs</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("dialog", "accept_replicated_dialogs", 1)
+...
+</programlisting>
+		</example>
+	</section>
+
+	<section>
+		<title><varname>replicate_dialogs_to</varname> (string)</title>
+		<para>
+			Adds a new dialog replication destination. The destination will
+		receive all dialog-related events (creation, updating and deletion)
+		over UDP, using the Binary Internal Interface.
+		</para>
+		<para>
+		<emphasis>
+			Default value is <quote>null</quote> (no replication destinations).
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>replicate_dialogs_to</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("dialog", "replicate_dialogs_to", "10.0.0.150:5062")
+...
+</programlisting>
+		</example>
+	</section>
 
 
 	</section>
@@ -1200,7 +1259,7 @@ create_dialog("B");
 		injected in-dialog requests (like malicious BYEs).
 		</para>
 		<para>
-		The performed tests are related to CSEQ sequance checking and routing
+		The performed tests are related to CSEQ sequence checking and routing
 		information checking (contact and route set).
 		</para>
 		<para>
@@ -1281,12 +1340,13 @@ create_dialog("B");
 		<function moreinfo="none">get_dialog_info(attr,var,key,key_val)</function>
 		</title>
 		<para>
-		The function extracts a dialog value from another dialog - it search 
-		through all existing (ongoing) dialogs for a dialog
-		that has a dialog variable named "key" with the value "key_val" 
-		(so a dialog where $dlg_val(key)=="key_val") - once found, it return
-		in pvar "var" the value of the the dialog variable "attr" from the 
-		found dialog.
+		The function extracts a dialog value from another dialog. It first searches
+		through all existing (ongoing) dialogs for a dialog that has a dialog
+		variable named "key" with the value "key_val" 
+		(so a dialog where $dlg_val(key)=="key_val"). If found, it returns
+		the value of the dialog variable "attr" from the 
+		found dialog in the "var" pseudo-variable, otherwise nothing is written
+		in "var", and a negative error code is returned.
 		</para>
 		<para>
 		NOTE: the function does not require to be called in the context of
@@ -1343,10 +1403,9 @@ $dlg_val(callee) = $ru;
 		<function moreinfo="none">set_dlg_profile(profile,[value])</function>
 		</title>
 		<para>
-		Inserts the current dialog into a profile. Note that the profile does
-		not supports values, this will be silently discarded. Also, there is
-		no check for inserting the same dialog in the same profile for multiple
-		times.
+		Inserts the current dialog into a profile. Note that if the profile does
+		not support values, this will be silently discarded. A dialog may be
+		inserted in the same profile multiple times.
 		</para>
 		<para>
 		NOTE: the dialog must be created before using this function (use 
@@ -1757,12 +1816,27 @@ $var(account) = $dlg_val("account_type");
 			dialog module is that you can use all the dialog modules functionalities:
 			profiles, dialog variables, dialog timeouts, etc..
 		</para>
+		<para>
+			Optionally,the function also receives a string parameter, which holds string flags.
+			Current options for the string flags are :
+			<itemizedlist>
+				<listitem>
+					<para><emphasis>U</emphasis> - Propagate the Username in the Contact header URI
+					</para>
+				</listitem>
+			</itemizedlist>
+		</para>
 		<example>
 		<title><function>topology_hiding</function> usage</title>
 		<programlisting format="linespecific">
 ...
 if(!has_totag() &amp;&amp; is_method("INVITE")) {
 	topology_hiding();
+}
+...
+...
+if(!has_totag() &amp;&amp; is_method("INVITE")) {
+	topology_hiding("U");
 }
 ...
 </programlisting>
@@ -1820,6 +1894,54 @@ if (has_totag()  &amp;&amp; (uri == myself)  &amp;&amp; is_method("INVITE|ACK|BY
 			Returns the number of failed dialogs ( dialogs were
 			never established due to whatever reasons - internal error,
 			negative reply, cancelled, etc )
+			</para>
+		</section>
+		<section>
+			<title><varname>create_sent</varname></title>
+			<para>
+				Returns the number of replicated dialog
+			<emphasis role='bold'>create</emphasis> requests send to other OpenSIPS
+			instances.
+			</para>
+		</section>
+		<section>
+			<title><varname>update_sent</varname></title>
+			<para>
+				Returns the number of replicated dialog
+			<emphasis role='bold'>update</emphasis> requests send to other OpenSIPS
+			instances.
+			</para>
+		</section>
+		<section>
+			<title><varname>delete_sent</varname></title>
+			<para>
+				Returns the number of replicated dialog
+			<emphasis role='bold'>delete</emphasis> requests send to other OpenSIPS
+			instances.
+			</para>
+		</section>
+		<section>
+			<title><varname>create_recv</varname></title>
+			<para>
+				Returns the number of dialog
+			<emphasis role='bold'>create</emphasis> events received from other
+			OpenSIPS instances.
+			</para>
+		</section>
+		<section>
+			<title><varname>update_recv</varname></title>
+			<para>
+				Returns the number of dialog
+			<emphasis role='bold'>update</emphasis> events received from other
+			OpenSIPS instances.
+			</para>
+		</section>
+		<section>
+			<title><varname>delete_recv</varname></title>
+			<para>
+				Returns the number of dialog
+			<emphasis role='bold'>delete</emphasis> events received from other
+			OpenSIPS instances.
 			</para>
 		</section>
 	</section>
@@ -1891,6 +2013,9 @@ if (has_totag()  &amp;&amp; (uri == myself)  &amp;&amp; is_method("INVITE|ACK|BY
 		dialog description
 		the associated context from modules sitting on top of
 		the dialog module.
+		This function also prints the dialog's values. In case of
+		binary values, the non-printable chars are represented in hex
+		(e.g. \x00)
 		</para>
 		<para>
 		Name: <emphasis>dlg_list_ctx</emphasis>
@@ -2067,6 +2192,25 @@ if (has_totag()  &amp;&amp; (uri == myself)  &amp;&amp; is_method("INVITE|ACK|BY
 		</section>
 
 		<section>
+		<title><varname>dlg_restore_db</varname></title>
+		<para>
+		Restores the dialog table after a potential desynchronization event.
+		The table is truncated, then populated with CONFIRMED dialogs from memory.
+		</para>
+		<para>
+		Name: <emphasis>dlg_restore_db</emphasis>
+		</para>
+		<para>It takes no parameters</para>
+		<para>
+		MI FIFO Command Format:
+		</para>
+		<programlisting  format="linespecific">
+		:dlg_restore_db:_reply_fifo_file_
+		_empty_line_
+		</programlisting>
+		</section>
+
+		<section>
 		<title><varname>list_all_profiles</varname></title>
 		<para>
 		Lists all the dialog profiles, along with 1 or 0 if
@@ -2152,7 +2296,7 @@ if (has_totag()  &amp;&amp; (uri == myself)  &amp;&amp; is_method("INVITE|ACK|BY
 		<section>
 			<title><varname>$DLG_flags</varname></title>
 			<para>
-			Returns the dialog flags array (as a single interger value)
+			Returns the dialog flags array (as a single integer value)
 			of the dialog corresponding to the processed sequential request.
 			This PV will be available only for sequential requests, 
 			after doing loose_route().
@@ -2185,6 +2329,61 @@ if (has_totag()  &amp;&amp; (uri == myself)  &amp;&amp; is_method("INVITE|ACK|BY
 			</para>
 			<para>
 			NULL will be returned if there is no dialog for the request.
+			</para>
+		</section>
+
+		<section>
+			<title><varname>$DLG_end_reason</varname></title>
+			<para>
+				Returns the reason for the dialog termination. It can be 
+				one of the following :
+
+				<itemizedlist>
+					<listitem>
+						<para><emphasis>Upstream BYE</emphasis> - Callee has sent a BYE
+						</para>
+					</listitem>
+					<listitem>
+						<para><emphasis>Downstream BYE</emphasis> - Caller has sent a BYE
+						</para>
+					</listitem>
+					<listitem>
+						<para><emphasis>Lifetime Timeout</emphasis> - Dialog lifetime expired
+						</para>
+					</listitem>
+					<listitem>
+						<para><emphasis>MI Termination</emphasis> - Dialog ended via the MI interface
+						</para>
+					</listitem>
+					<listitem>
+						<para><emphasis>Ping Timeout</emphasis> - Dialog ended because no reply to in-dialog pings
+						</para>
+					</listitem>
+					<listitem>
+						<para><emphasis>RTPProxy Timeout</emphasis> - Media timeout signaled by RTPProxy
+						</para>
+					</listitem>
+				</itemizedlist>
+			</para>
+			<para>
+				NULL will be returned if there is no dialog for the request,
+				or if the dialog is not ended in the current context.
+			</para>
+		</section>
+
+		<section id="timeout-pvar-id">
+			<title><varname>$DLG_timeout</varname></title>
+			<para>
+				Used to set the dialog lifetime (in seconds). When read, the variable
+				returns the number of seconds until the dialog expires and is destroyed.
+				Note that reading the variable is only possible after the dialog is created
+				(for initial requests) or after doing loose_route() (for sequential requests).
+				Important notice: using this variable with a REALTIME db_mode is very inefficient,
+				because every time the dialog value is changed, a database update is done.
+			</para>
+			<para>
+				NULL will be returned if there is no dialog for the request, otherwise the
+				number of seconds until the dialog expiration.
 			</para>
 		</section>
 

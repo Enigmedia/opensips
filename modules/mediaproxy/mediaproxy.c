@@ -448,9 +448,9 @@ get_cseq_number(struct sip_msg *msg, str *cseq)
 {
     struct cell *trans = tm_api.t_gett();
 
-    if (msg->first_line.type == SIP_REPLY && trans != NULL && trans != T_UNDEFINED) {
-        cseq->s = trans->cseq_n.s+CSEQ_LEN;
-        cseq->len = trans->cseq_n.len-CSEQ_LEN;
+    if (msg->first_line.type == SIP_REPLY && trans != NULL && trans != T_UNDEFINED &&
+    trans->uas.request!=NULL ) {
+        *cseq = get_cseq(trans->uas.request)->number;
     } else {
         if (msg->cseq == NULL) {
             if (parse_headers(msg, HDR_CSEQ_F, 0)==-1) {
@@ -463,11 +463,6 @@ get_cseq_number(struct sip_msg *msg, str *cseq)
             }
         }
         *cseq = get_cseq(msg)->number;
-    }
-
-    if (cseq->s==NULL || cseq->len==0) {
-        LM_ERR("missing CSeq number\n");
-        return False;
     }
 
     return True;
@@ -509,6 +504,11 @@ get_to_uri(struct sip_msg *msg)
     static str unknown = str_init("unknown");
     str uri;
     char *ptr;
+
+    if (parse_headers(msg, HDR_TO_F, 0) == -1) {
+        LM_ERR("failed to parse To header\n");
+        return unknown;
+    }
 
     if (!msg->to) {
         LM_ERR("missing To header\n");
@@ -561,6 +561,11 @@ get_to_tag(struct sip_msg *msg)
 
     if (msg->first_line.type==SIP_REPLY && msg->REPLY_STATUS<200) {
         // Ignore the To tag for provisional replies
+        return undefined;
+    }
+
+    if (parse_headers(msg, HDR_TO_F, 0) == -1) {
+        LM_ERR("failed to parse To header\n");
         return undefined;
     }
 
@@ -680,8 +685,8 @@ check_content_type(struct sip_msg *msg)
 static int
 get_sdp_message(struct sip_msg *msg, str *sdp)
 {
-    if ( get_body(msg, sdp)!=0 || sdp->len==0)
-        return -1;
+    if (get_body(msg, sdp)!=0 || sdp->len==0)
+        return -2;
 
     if (!check_content_type(msg))
         return -1;
@@ -856,7 +861,7 @@ has_ice_candidates(str *block)
 }
 
 
-// will return true if given block contains an ICE 
+// will return true if given block contains an ICE
 // candidate with the given component ID
 static Bool
 has_ice_candidate_component(str *block, int id)
@@ -881,7 +886,7 @@ has_ice_candidate_component(str *block, int id)
                 return True;
             }
         }
-        
+
         chunk.s   = zone.s + zone.len;
         chunk.len = block_end - chunk.s;
     }
@@ -1440,7 +1445,7 @@ send_command(char *command)
 // ice_candidate_data: it carries data across the dialog when using engage_media_proxy:
 //   - priority: the priority that should be used for the ICE candidate
 //      * -1: no candidate should be added.
-//      * other: the specified type preference should be used for calculating 
+//      * other: the specified type preference should be used for calculating
 //   - skip_next_reply: flag for knowing the fact that the next reply with SDP must be skipped
 //     because it is a reply to a re-INVITE or UPDATE *after* the ICE negotiation
 static int
@@ -1462,7 +1467,7 @@ use_media_proxy(struct sip_msg *msg, char *dialog_id, ice_candidate_data *ice_da
         type = "request";
     } else if (msg->first_line.type == SIP_REPLY) {
         if (ice_data != NULL && ice_data->skip_next_reply) {
-            // we don't process replies to ICE negotiation end requests 
+            // we don't process replies to ICE negotiation end requests
             // (those containing a=remote-candidates)
             ice_data->skip_next_reply = False;
             return -1;
@@ -1500,7 +1505,7 @@ use_media_proxy(struct sip_msg *msg, char *dialog_id, ice_candidate_data *ice_da
             }
             return -1;
         }
-       
+
         status = get_session_info(&sdp, &session);
         if (status < 0) {
             LM_ERR("can't extract media streams from the SDP message\n");
@@ -1637,7 +1642,7 @@ use_media_proxy(struct sip_msg *msg, char *dialog_id, ice_candidate_data *ice_da
         if (j >= len) {
             break;
         }
-        
+
         if (!isnullport(stream.port)) {
             if (!replace_element(msg, &stream.port, &tokens[j])) {
                 LM_ERR("failed to replace port in media stream number %d\n", i+1);
@@ -1696,10 +1701,12 @@ use_media_proxy(struct sip_msg *msg, char *dialog_id, ice_candidate_data *ice_da
             unsigned int priority = (ice_data == NULL)?get_ice_candidate_priority(priority_str):ice_data->priority;
             port = strtoint(&tokens[j]);
             candidate.s = buf;
-            candidate.len = sprintf(candidate.s, "a=candidate:R%x 1 UDP %u %.*s %i typ relay%.*s",
+            candidate.len = sprintf(candidate.s, "a=candidate:R%x 1 UDP %u %.*s %i typ relay raddr %.*s rport %i%.*s",
                                     hexip.s_addr,
                                     priority,
-                                    tokens[0].len, tokens[0].s, 
+                                    tokens[0].len, tokens[0].s,
+                                    port,
+                                    tokens[0].len, tokens[0].s,
                                     port,
                                     session.separator.len, session.separator.s);
 
@@ -1710,10 +1717,12 @@ use_media_proxy(struct sip_msg *msg, char *dialog_id, ice_candidate_data *ice_da
 
             if (stream.has_rtcp_ice) {
                 candidate.s = buf;
-                candidate.len = sprintf(candidate.s, "a=candidate:R%x 2 UDP %u %.*s %i typ relay%.*s",
+                candidate.len = sprintf(candidate.s, "a=candidate:R%x 2 UDP %u %.*s %i typ relay raddr %.*s rport %i%.*s",
                                         hexip.s_addr,
                                         priority-1,
-                                        tokens[0].len, tokens[0].s, 
+                                        tokens[0].len, tokens[0].s,
+                                        port+1,
+                                        tokens[0].len, tokens[0].s,
                                         port+1,
                                         session.separator.len, session.separator.s);
 

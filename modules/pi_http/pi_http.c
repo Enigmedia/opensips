@@ -53,6 +53,7 @@ static ssize_t ph_flush_data(void *cls, uint64_t pos, char *buf, size_t max);
 static struct mi_root *mi_framework_reload(struct mi_root* cmd, void* param);
 
 str http_root = str_init("pi");
+int http_method = 0;
 str filename = {NULL, 0};
 
 httpd_api_t httpd_api;
@@ -68,8 +69,9 @@ static const str PI_HTTP_U_METHOD = str_init("<html><body>"
 
 /* module parameters */
 static param_export_t params[] = {
-	{"pi_http_root", STR_PARAM,	&http_root.s},
-	{"framework",    STR_PARAM,	&filename.s},
+	{"pi_http_root",   STR_PARAM, &http_root.s},
+	{"pi_http_method", INT_PARAM, &http_method},
+	{"framework",      STR_PARAM, &filename.s},
 	{0,0,0}
 };
 
@@ -140,6 +142,11 @@ static int mod_init(void)
 
 	http_root.len = strlen(http_root.s);
 
+	if (http_method<0 || http_method>1) {
+		LM_ERR("pi_http_method can be between [0,1]\n");
+		return -1;
+	}
+
 	/* Load httpd api */
 	if(load_httpd_api(&httpd_api)<0) {
 		LM_ERR("Failed to load httpd api\n");
@@ -201,14 +208,15 @@ void ph_answer_to_connection (void *cls, void *connection,
 	int cmd = -1;
 
 	LM_DBG("START *** cls=%p, connection=%p, url=%s, method=%s, "
-		"versio=%s, upload_data[%d]=%p, con_cls=%p\n",
+		"versio=%s, upload_data[%d]=%p, *con_cls=%p\n",
 			cls, connection, url, method, version,
-			(int)*upload_data_size, upload_data, con_cls);
-	if (strncmp(method, "GET", 3)==0) {
+			(int)*upload_data_size, upload_data, *con_cls);
+	if ((strncmp(method, "GET", 3)==0)
+		|| (strncmp(method, "POST", 4)==0)) {
 		lock_get(ph_lock);
 		if(0 == ph_parse_url(url, &mod, &cmd)) {
 				page->s = buffer->s;
-			if(0!=ph_run_pi_cmd(mod, cmd, connection, page, buffer)){
+			if(0!=ph_run_pi_cmd(mod, cmd, connection, *con_cls, page, buffer)){
 				LM_ERR("unable to build response for cmd [%d]\n",
 							cmd);
 				*page = PI_HTTP_U_ERROR;
@@ -218,9 +226,6 @@ void ph_answer_to_connection (void *cls, void *connection,
 			*page = PI_HTTP_U_URL;
 		}
 		lock_release(ph_lock);
-	} else if (strncmp(method, "POST", 4)==0) {
-		LM_ERR("unexpected method [%s]\n", method);
-		*page = PI_HTTP_U_METHOD;
 	} else {
 		LM_ERR("unexpected method [%s]\n", method);
 		*page = PI_HTTP_U_METHOD;

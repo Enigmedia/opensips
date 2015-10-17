@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -82,6 +82,7 @@ enum {
 	B2B_NOTIFY,
 	B2B_REFER,
 	B2B_CANCEL,
+	B2B_UPDATE,
 	B2B_METHODS_NO
 };
 
@@ -155,6 +156,9 @@ static inline int b2b_get_request_id(str* request)
 
 	if(request->len==MESSAGE_LEN &&strncasecmp(request->s, MESSAGE, MESSAGE_LEN)==0)
 		return B2B_MESSAGE;
+
+	if(request->len==UPDATE_LEN &&strncasecmp(request->s, UPDATE, UPDATE_LEN)==0)
+		return B2B_UPDATE;
 
 	return -1;
 }

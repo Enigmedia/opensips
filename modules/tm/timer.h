@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -59,7 +59,8 @@ typedef struct timer_link
 	struct timer_link     *ld_tl;
 	volatile utime_t      time_out;
 	struct timer          *timer_list;
-	unsigned int          deleted;
+	unsigned short        deleted;
+	unsigned short        set;
 #ifdef EXTRA_DEBUG
 	enum timer_groups  tg;
 #endif
@@ -92,11 +93,11 @@ extern unsigned int timer_id2timeout[NR_OF_TIMER_LISTS];
 
 
 
-struct timer_table * tm_init_timers();
+struct timer_table * tm_init_timers( unsigned int sets );
 void unlink_timer_lists();
 void free_timer_table();
-void init_timer_list( enum lists list_id);
-void reset_timer_list( enum lists list_id);
+void init_timer_list( unsigned int set, enum lists list_id);
+void reset_timer_list( unsigned int set, enum lists list_id);
 
 void reset_timer( struct timer_link* tl );
 

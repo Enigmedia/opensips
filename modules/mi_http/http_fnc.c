@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * Copyright (C) 2011 VoIP Embedded Inc.
+ * Copyright (C) 2011-2013 VoIP Embedded, Inc.
  *
  * This file is part of Open SIP Server (opensips).
  *
@@ -38,6 +38,7 @@
 
 
 extern str http_root;
+extern int http_method;
 str upSinceCTime;
 
 http_mi_cmd_t* http_mi_cmds;
@@ -109,6 +110,20 @@ do{	\
 	memcpy((p), (s6).s, (s6).len); (p) += (s6).len;	\
 }while(0)
 
+#define MI_HTTP_COPY_7(p,s1,s2,s3,s4,s5,s6,s7)	\
+do{	\
+	if ((int)((p)-buf)+(s1).len+(s2).len+(s3).len+(s4).len+(s5).len+(s6).len+(s7).len>max_page_len) {	\
+		goto error;	\
+	}	\
+	memcpy((p), (s1).s, (s1).len); (p) += (s1).len;	\
+	memcpy((p), (s2).s, (s2).len); (p) += (s2).len;	\
+	memcpy((p), (s3).s, (s3).len); (p) += (s3).len;	\
+	memcpy((p), (s4).s, (s4).len); (p) += (s4).len;	\
+	memcpy((p), (s5).s, (s5).len); (p) += (s5).len;	\
+	memcpy((p), (s6).s, (s6).len); (p) += (s6).len;	\
+	memcpy((p), (s7).s, (s7).len); (p) += (s7).len;	\
+}while(0)
+
 #define MI_HTTP_COPY_10(p,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10)	\
 do{	\
 	if ((int)((p)-buf)+(s1).len+(s2).len+(s3).len+(s4).len+(s5).len+(s6).len+(s7).len+(s8).len+(s9).len+(s10).len>max_page_len) {	\
@@ -144,6 +159,73 @@ do{	\
 	memcpy((p), (s11).s, (s11).len); (p) += (s11).len;	\
 }while(0)
 
+#define MI_HTTP_COPY_12(p,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12)	\
+do{	\
+	if ((int)((p)-buf)+(s1).len+(s2).len+(s3).len+(s4).len+(s5).len+(s6).len+(s7).len+(s8).len+(s9).len+(s10).len+(s11).len+(s12).len>max_page_len) {	\
+		goto error;	\
+	}	\
+	memcpy((p), (s1).s, (s1).len); (p) += (s1).len;	\
+	memcpy((p), (s2).s, (s2).len); (p) += (s2).len;	\
+	memcpy((p), (s3).s, (s3).len); (p) += (s3).len;	\
+	memcpy((p), (s4).s, (s4).len); (p) += (s4).len;	\
+	memcpy((p), (s5).s, (s5).len); (p) += (s5).len;	\
+	memcpy((p), (s6).s, (s6).len); (p) += (s6).len;	\
+	memcpy((p), (s7).s, (s7).len); (p) += (s7).len;	\
+	memcpy((p), (s8).s, (s8).len); (p) += (s8).len;	\
+	memcpy((p), (s9).s, (s9).len); (p) += (s9).len;	\
+	memcpy((p), (s10).s, (s10).len); (p) += (s10).len;	\
+	memcpy((p), (s11).s, (s11).len); (p) += (s11).len;	\
+	memcpy((p), (s12).s, (s12).len); (p) += (s12).len;	\
+}while(0)
+
+
+#define MI_HTTP_ESC_COPY(p,str,temp_holder,temp_counter)	\
+do{	\
+	(temp_holder).s = (str).s;	\
+	(temp_holder).len = 0;	\
+	for((temp_counter)=0;(temp_counter)<(str).len;(temp_counter)++) {	\
+		switch((str).s[(temp_counter)]) {	\
+		case '<':	\
+			(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+			MI_HTTP_COPY_2(p, (temp_holder), MI_HTTP_ESC_LT);	\
+			(temp_holder).s = (str).s + (temp_counter) + 1;	\
+			(temp_holder).len = (temp_counter) + 1;	\
+			break;	\
+		case '>':	\
+			(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+			MI_HTTP_COPY_2(p, (temp_holder), MI_HTTP_ESC_GT);	\
+			(temp_holder).s = (str).s + (temp_counter) + 1;	\
+			(temp_holder).len = (temp_counter) + 1;	\
+			break;	\
+		case '&':	\
+			(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+			MI_HTTP_COPY_2(p, (temp_holder), MI_HTTP_ESC_AMP);	\
+			(temp_holder).s = (str).s + (temp_counter) + 1;	\
+			(temp_holder).len = (temp_counter) + 1;	\
+			break;	\
+		case '"':	\
+			(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+			MI_HTTP_COPY_2(p, (temp_holder), MI_HTTP_ESC_QUOT);	\
+			(temp_holder).s = (str).s + (temp_counter) + 1;	\
+			(temp_holder).len = (temp_counter) + 1;	\
+			break;	\
+		case '\'':	\
+			(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+			MI_HTTP_COPY_2(p, (temp_holder), MI_HTTP_ESC_SQUOT);	\
+			(temp_holder).s = (str).s + (temp_counter) + 1;	\
+			(temp_holder).len = (temp_counter) + 1;	\
+			break;	\
+		}	\
+	}	\
+	(temp_holder).len = (temp_counter) - (temp_holder).len;	\
+	MI_HTTP_COPY(p, (temp_holder));	\
+}while(0)
+
+static const str MI_HTTP_METHOD[] = {
+	str_init("GET"),
+	str_init("POST")
+};
+
 static const str MI_HTTP_Response_Head_1 = str_init("<html><head><title>"\
 	"OpenSIPS Management Interface</title>"\
 	"<style type=\"text/css\">"\
@@ -152,14 +234,15 @@ static const str MI_HTTP_Response_Head_1 = str_init("<html><head><title>"\
 		"a:hover{text-decoration:none;}a{text-decoration:underline;}"\
 		".foot{padding-top:40px;font-size:10px;color:#333333;}"\
 		".foot a{font-size:10px;color:#000000;}"
-		"table.center{margin-left:auto;margin-right:auto;}\n"\
+		"table.center{margin-left:auto;margin-right:auto;}"\
 	"</style>"\
 	"<meta http-equiv=\"Expires\" content=\"0\">"\
 	"<meta http-equiv=\"Pragma\" content=\"no-cache\">");
 
 
 static const str MI_HTTP_Response_Head_2 = str_init(\
-"</head>"\
+"<link rel=\"icon\" type=\"image/png\" href=\"http://opensips.org/favicon.png\">"\
+"</head>\n"\
 "<body alink=\"#000000\" bgcolor=\"#ffffff\" link=\"#000000\" text=\"#000000\" vlink=\"#000000\">");
 
 static const str MI_HTTP_Response_Title_Table_1 = str_init(\
@@ -208,7 +291,9 @@ static const str MI_HTTP_CODE_1 = str_init("<pre>");
 static const str MI_HTTP_CODE_2 = str_init("</pre>");
 
 static const str MI_HTTP_Post_1 = str_init("\n"\
-"		<form name=\"input\" method=\"get\">\n"\
+"		<form name=\"input\" method=\"");
+
+static const str MI_HTTP_Post_2 = str_init("\">\n"\
 "			<input type=\"text\" name=\"arg\"/>\n"\
 "			<input type=\"submit\" value=\"Submit\"/>\n"\
 "		</form>\n");
@@ -217,13 +302,18 @@ static const str MI_HTTP_Response_Foot = str_init(\
 "\n</center>\n<div align=\"center\" class=\"foot\" style=\"margin:20px auto\">"\
 	"<span style='margin-left:5px;'></span>"\
 	"<a href=\"http://opensips.org\">OpenSIPS web site</a><br/>"\
-	"Copyright &copy; 2011-2012 <a href=\"http://www.voipembedded.com/\">VoIP Embedded</a>"\
+	"Copyright &copy; 2011-2013 <a href=\"http://www.voipembedded.com/\">VoIP Embedded, Inc.</a>"\
 								". All rights reserved."\
 "</div></body></html>");
 
 #define MI_HTTP_ROWSPAN 5
 static const str MI_HTTP_CMD_ROWSPAN = str_init("5");
 
+static const str MI_HTTP_ESC_LT =    str_init("&lt;");   /* < */
+static const str MI_HTTP_ESC_GT =    str_init("&gt;");   /* > */
+static const str MI_HTTP_ESC_AMP =   str_init("&amp;");  /* & */
+static const str MI_HTTP_ESC_QUOT =  str_init("&quot;"); /* " */
+static const str MI_HTTP_ESC_SQUOT = str_init("&#39;");  /* ' */
 
 
 int mi_http_init_async_lock(void)
@@ -464,7 +554,7 @@ static inline struct mi_handler* mi_http_build_async_handler(int mod, int cmd)
 	return hdl;
 }
 
-struct mi_root* mi_http_run_mi_cmd(int mod, int cmd, const char* arg,
+struct mi_root* mi_http_run_mi_cmd(int mod, int cmd, const str* arg,
 			str *page, str *buffer, struct mi_handler **async_hdl)
 {
 	struct mi_cmd *f;
@@ -500,9 +590,9 @@ struct mi_root* mi_http_run_mi_cmd(int mod, int cmd, const char* arg,
 	if (f->flags&MI_NO_INPUT_FLAG) {
 		mi_cmd = NULL;
 	} else {
-		if (arg) {
-			buf.s = (char*)arg;
-			buf.len = strlen(arg);
+		if (arg->s) {
+			buf.s = arg->s;
+			buf.len = arg->len;
 			LM_DBG("start parsing [%d][%s]\n", buf.len, buf.s);
 			mi_cmd = mi_http_parse_tree(&buf);
 			if (mi_cmd==NULL)
@@ -605,6 +695,8 @@ static inline int mi_http_write_node(char** pointer, char* buf, int max_page_len
 					struct mi_node *node, int level)
 {
 	struct mi_attr *attr;
+	int temp_counter;
+	str temp_holder;
 
 	/* name and value */
 	if (node->name.s!=NULL) {
@@ -614,16 +706,21 @@ static inline int mi_http_write_node(char** pointer, char* buf, int max_page_len
 		MI_HTTP_COPY(*pointer,node->name);
 	}
 	if (node->value.s!=NULL) {
-		MI_HTTP_COPY_2(*pointer,MI_HTTP_NODE_SEPARATOR,node->value);
+		MI_HTTP_COPY(*pointer,MI_HTTP_NODE_SEPARATOR);
+		MI_HTTP_ESC_COPY(*pointer, node->value,
+				temp_holder, temp_counter);
 	}
 	/* attributes */
 	for(attr=node->attributes;attr!=NULL;attr=attr->next) {
 		if (attr->name.s!=NULL) {
-			MI_HTTP_COPY_2(*pointer,MI_HTTP_ATTR_SEPARATOR,attr->name);
-		}
-		if (attr->value.s!=NULL) {
-			MI_HTTP_COPY_2(*pointer,MI_HTTP_ATTR_VAL_SEPARATOR,
-						attr->value);
+			MI_HTTP_COPY_3(*pointer,
+						MI_HTTP_ATTR_SEPARATOR,
+						attr->name,
+						MI_HTTP_ATTR_VAL_SEPARATOR);
+			if(attr->value.len) {
+				MI_HTTP_ESC_COPY(*pointer, attr->value,
+							temp_holder, temp_counter);
+			}
 		}
 	}
 	MI_HTTP_COPY(*pointer,MI_HTTP_BREAK);
@@ -819,11 +916,13 @@ int mi_http_build_header(str *page, int max_page_len,
 					MI_HTTP_Response_Menu_Cmd_td_4a);
 			if (cmd>=0){
 				if (j==1) {
-					MI_HTTP_COPY_5(p,
+					MI_HTTP_COPY_7(p,
 						MI_HTTP_Response_Menu_Cmd_td_1c,
 						MI_HTTP_CMD_ROWSPAN,
 						MI_HTTP_Response_Menu_Cmd_td_3c,
 						MI_HTTP_Post_1,
+						MI_HTTP_METHOD[http_method],
+						MI_HTTP_Post_2,
 						MI_HTTP_Response_Menu_Cmd_td_4c);
 				} else if (j>MI_HTTP_ROWSPAN) {
 					MI_HTTP_COPY_3(p,
@@ -836,7 +935,7 @@ int mi_http_build_header(str *page, int max_page_len,
 		}
 		if (cmd>=0){
 			if (j==1) {
-				MI_HTTP_COPY_10(p,MI_HTTP_Response_Menu_Cmd_tr_1,
+				MI_HTTP_COPY_12(p,MI_HTTP_Response_Menu_Cmd_tr_1,
 						MI_HTTP_Response_Menu_Cmd_td_1d,
 						MI_HTTP_NBSP,
 						MI_HTTP_Response_Menu_Cmd_td_4d,
@@ -844,6 +943,8 @@ int mi_http_build_header(str *page, int max_page_len,
 						MI_HTTP_CMD_ROWSPAN,
 						MI_HTTP_Response_Menu_Cmd_td_3c,
 						MI_HTTP_Post_1,
+						MI_HTTP_METHOD[http_method],
+						MI_HTTP_Post_2,
 						MI_HTTP_Response_Menu_Cmd_td_4c,
 						MI_HTTP_Response_Menu_Cmd_tr_2);
 				j++;

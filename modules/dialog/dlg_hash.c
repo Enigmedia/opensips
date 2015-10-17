@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -25,16 +25,16 @@
  * 2007-03-06  syncronized state machine added for dialog state. New tranzition
  *             design based on events; removed num_1xx and num_2xx (bogdan)
  * 2007-04-30  added dialog matching without DID (dialog ID), but based only
- *             on RFC3261 elements - based on an original patch submitted 
+ *             on RFC3261 elements - based on an original patch submitted
  *             by Michel Bensoussan <michel@extricom.com> (bogdan)
  * 2007-07-06  additional information stored in order to save it in the db:
- *             cseq, route_set, contact and sock_info for both caller and 
+ *             cseq, route_set, contact and sock_info for both caller and
  *             callee (ancuta)
  * 2007-07-10  Optimized dlg_match_mode 2 (DID_NONE), it now employs a proper
- *             hash table lookup and isn't dependant on the is_direction 
- *             function (which requires an RR param like dlg_match_mode 0 
- *             anyways.. ;) ; based on a patch from 
- *             Tavis Paquette <tavis@galaxytelecom.net> 
+ *             hash table lookup and isn't dependant on the is_direction
+ *             function (which requires an RR param like dlg_match_mode 0
+ *             anyways.. ;) ; based on a patch from
+ *             Tavis Paquette <tavis@galaxytelecom.net>
  *             and Peter Baer <pbaer@galaxytelecom.net>  (bogdan)
  * 2008-04-17  added new type of callback to be triggered right before the
  *              dialog is destroyed (deleted from memory) (bogdan)
@@ -55,8 +55,10 @@
 #include "../../md5utils.h"
 #include "../../parser/parse_to.h"
 #include "../tm/tm_load.h"
+#include "../../script_cb.h"
 #include "dlg_hash.h"
 #include "dlg_profile.h"
+#include "dlg_replication.h"
 
 #define MAX_LDG_LOCKS  2048
 #define MIN_LDG_LOCKS  2
@@ -69,8 +71,6 @@ extern int last_dst_leg;
 struct dlg_table *d_table = NULL;
 struct dlg_cell  *current_dlg_pointer = NULL ;
 
-#define dlg_hash(_callid) core_hash(_callid, 0, d_table->size)
-
 
 int dialog_cleanup( struct sip_msg *msg, void *param )
 {
@@ -79,9 +79,10 @@ int dialog_cleanup( struct sip_msg *msg, void *param )
 		current_dlg_pointer = NULL;
 	}
 	last_dst_leg = -1;
+	dlg_tmp_timeout = -1;
+	dlg_tmp_timeout_id = -1;
 
-	/* need to return non-zero - 0 will break the exec of the request */
-	return 1;
+	return SCB_RUN_ALL;
 }
 
 
@@ -96,8 +97,11 @@ struct dlg_cell *get_current_dialog(void)
 	} else {
 		/* use current transaction to get dialog */
 		trans = d_tmb.t_gett();
-		if (trans==NULL || trans==T_UNDEFINED)
-			return NULL;
+		if (trans==NULL || trans==T_UNDEFINED) {
+			/* no transaction - perhaps internally terminated
+			dialog - trust the module */
+			return current_dlg_pointer;
+		}
 		return (struct dlg_cell*)trans->dialog_ctx;
 	}
 }
@@ -163,7 +167,7 @@ static inline void free_dlg_dlg(struct dlg_cell *dlg)
 		destroy_dlg_callbacks_list(dlg->cbs.first);
 
 	if (dlg->profile_links)
-		destroy_linkers(dlg->profile_links);
+		destroy_linkers(dlg->profile_links, 0);
 
 	if (dlg->legs) {
 		for( i=0 ; i<dlg->legs_no[DLG_LEGS_USED] ; i++) {
@@ -189,6 +193,8 @@ static inline void free_dlg_dlg(struct dlg_cell *dlg)
 		shm_free(dv);
 	}
 
+	if (dlg->terminate_reason.s)
+		shm_free(dlg->terminate_reason.s);
 	shm_free(dlg);
 }
 
@@ -307,7 +313,7 @@ struct dlg_cell* build_new_dlg( str *callid, str *from_uri, str *to_uri,
 /* first time it will called for a CALLER leg - at that time there will
    be no leg allocated, so automatically CALLER gets the first position, while
    the CALLEE legs will follow into the array in the same order they came */
-int dlg_add_leg_info(struct dlg_cell *dlg, str* tag, str *rr, 
+int dlg_add_leg_info(struct dlg_cell *dlg, str* tag, str *rr,
 		str *contact,str *cseq, struct socket_info *sock,
 		str *mangled_from,str *mangled_to)
 {
@@ -430,7 +436,7 @@ int dlg_add_leg_info(struct dlg_cell *dlg, str* tag, str *rr,
 
 		/* set cseq for caller to 0
 		 * future requests to the caller leg will update this
-		 * needed for proper validation of in-dialog requests 
+		 * needed for proper validation of in-dialog requests
 		 *
 		 * TM also increases this value by one, if dialog
 		 * is terminated from the middle, so 0 is ok*/
@@ -460,7 +466,7 @@ int dlg_add_leg_info(struct dlg_cell *dlg, str* tag, str *rr,
 int dlg_update_cseq(struct dlg_cell * dlg, unsigned int leg, str *cseq,int inv)
 {
 	str* update_cseq;
-	
+
 	if (inv == 1)
 		update_cseq = &dlg->legs[leg].inv_cseq;
 	else
@@ -759,8 +765,8 @@ static inline void log_next_state_dlg(const int event,
 }
 
 
-void next_state_dlg(struct dlg_cell *dlg, int event,
-								int *old_state, int *new_state, int *unref)
+void next_state_dlg(struct dlg_cell *dlg, int event, int dir, int *old_state,
+					int *new_state, int *unref, char is_replicated)
 {
 	struct dlg_entry *d_entry;
 
@@ -785,7 +791,7 @@ void next_state_dlg(struct dlg_cell *dlg, int event,
 					unref_dlg_unsafe(dlg,1,d_entry); /* unref from TM CBs*/
 					break;
 				case DLG_STATE_DELETED:
-					/* as the dialog aleady is in DELETE state, it is 
+					/* as the dialog aleady is in DELETE state, it is
 					dangerous to directly unref it from here as it might
 					be last ref -> dialog will be destroied and we will end up
 					with a dangling pointer :D - bogdan */
@@ -852,6 +858,10 @@ void next_state_dlg(struct dlg_cell *dlg, int event,
 			switch (dlg->state) {
 				case DLG_STATE_CONFIRMED_NA:
 				case DLG_STATE_CONFIRMED:
+					if (dir == DLG_DIR_DOWNSTREAM && last_dst_leg!=dlg->legs_no[DLG_LEG_200OK] )
+						/* to end the call, the BYE must be received
+						 * on the same leg as the 200 OK for INVITE */
+						break;
 					dlg->flags |= DLG_FLAG_HASBYE;
 					dlg->state = DLG_STATE_DELETED;
 					*unref = 1; /* unref from hash -> dialog ended */
@@ -861,7 +871,7 @@ void next_state_dlg(struct dlg_cell *dlg, int event,
 				default:
 					/* only case for BYEs in early or unconfirmed states
 					 * is for requests generate by caller or callee.
-					 * We never internally generate BYEs for early dialogs 
+					 * We never internally generate BYEs for early dialogs
 					 *
 					 * RFC says caller may send BYEs for early dialogs,
 					 * while the callee side MUST not send such requests*/
@@ -900,23 +910,36 @@ void next_state_dlg(struct dlg_cell *dlg, int event,
 
 	dlg_unlock( d_table, d_entry);
 
+	 if (!is_replicated && replication_dests &&
+	(*old_state == DLG_STATE_CONFIRMED_NA || *old_state == DLG_STATE_CONFIRMED) &&
+	dlg->state == DLG_STATE_DELETED)
+		replicate_dialog_deleted(dlg);
+
+
 	LM_DBG("dialog %p changed from state %d to "
 		"state %d, due event %d\n",dlg,*old_state,*new_state,event);
 }
 
 
 /**************************** MI functions ******************************/
+static char *dlg_val_buf;
 static inline int internal_mi_print_dlg(struct mi_node *rpl,
 									struct dlg_cell *dlg, int with_context)
 {
 	struct mi_node* node= NULL;
 	struct mi_node* node1 = NULL;
+	struct mi_node* node2 = NULL;
+	struct mi_node* node3 = NULL;
 	struct mi_attr* attr= NULL;
 	struct dlg_profile_link *dl;
 	struct dlg_val* dv;
 	int len;
 	char* p;
-	int i;
+	int i, j;
+	time_t _ts;
+	struct tm* t;
+	char date_buf[MI_DATE_BUF_LEN];
+	int date_buf_len;
 
 	node = add_mi_node_child(rpl, 0, "dialog",6 , 0, 0 );
 	if (node==0)
@@ -937,16 +960,40 @@ static inline int internal_mi_print_dlg(struct mi_node *rpl,
 	if (node1==0)
 		goto error;
 
-	p= int2str((unsigned long)dlg->start_ts, &len);
+	_ts = (time_t)dlg->start_ts;
+	p= int2str((unsigned long)_ts, &len);
 	node1 = add_mi_node_child(node,MI_DUP_VALUE,"timestart",9, p, len);
 	if (node1==0)
 		goto error;
+	if (_ts) {
+		t = localtime(&_ts);
+		date_buf_len = strftime(date_buf, MI_DATE_BUF_LEN - 1,
+						"%Y-%m-%d %H:%M:%S", t);
+		if (date_buf_len != 0) {
+			node1 = add_mi_node_child(node,MI_DUP_VALUE, "datestart", 9,
+						date_buf, date_buf_len);
+			if (node1==0)
+				goto error;
+		}
+	}
 
-	p= int2str((unsigned long)(dlg->tl.timeout?((unsigned int)time(0) +
-				dlg->tl.timeout - get_ticks()):0), &len);
+	_ts = (time_t)(dlg->tl.timeout?((unsigned int)time(0) +
+                dlg->tl.timeout - get_ticks()):0);
+	p= int2str((unsigned long)_ts, &len);
 	node1 = add_mi_node_child(node,MI_DUP_VALUE, "timeout", 7, p, len);
 	if (node1==0)
 		goto error;
+	if (_ts) {
+		t = localtime(&_ts);
+		date_buf_len = strftime(date_buf, MI_DATE_BUF_LEN - 1,
+						"%Y-%m-%d %H:%M:%S", t);
+		if (date_buf_len != 0) {
+			node1 = add_mi_node_child(node,MI_DUP_VALUE, "dateout", 7,
+						date_buf, date_buf_len);
+			if (node1==0)
+				goto error;
+		}
+	}
 
 	node1 = add_mi_node_child(node, MI_DUP_VALUE, "callid", 6,
 			dlg->callid.s, dlg->callid.len);
@@ -989,44 +1036,52 @@ static inline int internal_mi_print_dlg(struct mi_node *rpl,
 			goto error;
 
 		node1 = add_mi_node_child(node, 0,"caller_bind_addr",16,
-				dlg->legs[DLG_CALLER_LEG].bind_addr->sock_str.s, 
+				dlg->legs[DLG_CALLER_LEG].bind_addr->sock_str.s,
 				dlg->legs[DLG_CALLER_LEG].bind_addr->sock_str.len);
 		if(node1 == 0)
 			goto error;
 	}
 
+	node1 = add_mi_node_child(node, MI_IS_ARRAY, "CALLEES", 7, NULL, 0);
+	if(node1 == 0)
+		goto error;
+
 	for( i=1 ; i < dlg->legs_no[DLG_LEGS_USED] ; i++  ) {
 
-		node1 = add_mi_node_child(node, MI_DUP_VALUE, "callee_tag", 10,
+		node2 = add_mi_node_child(node1, 0, "callee", 6, NULL, 0);
+		if(node2 == 0)
+			goto error;
+
+		node3 = add_mi_node_child(node2, MI_DUP_VALUE, "callee_tag", 10,
 				dlg->legs[i].tag.s, dlg->legs[i].tag.len);
-		if(node1 == 0)
+		if(node3 == 0)
 			goto error;
 
-		node1 = add_mi_node_child(node, MI_DUP_VALUE, "callee_contact", 14,
+		node3 = add_mi_node_child(node2, MI_DUP_VALUE, "callee_contact", 14,
 				dlg->legs[i].contact.s, dlg->legs[i].contact.len);
-		if(node1 == 0)
+		if(node3 == 0)
 			goto error;
 
-		node1 = add_mi_node_child(node, MI_DUP_VALUE, "caller_cseq", 11,
+		node3 = add_mi_node_child(node2, MI_DUP_VALUE, "caller_cseq", 11,
 				dlg->legs[i].r_cseq.s, dlg->legs[i].r_cseq.len);
-		if(node1 == 0)
+		if(node3 == 0)
 			goto error;
 
-		node1 = add_mi_node_child(node, MI_DUP_VALUE,"callee_route_set",16,
+		node3 = add_mi_node_child(node2, MI_DUP_VALUE,"callee_route_set",16,
 				dlg->legs[i].route_set.s, dlg->legs[i].route_set.len);
-		if(node1 == 0)
+		if(node3 == 0)
 			goto error;
 
 		if (dlg->legs[i].bind_addr) {
-			node1 = add_mi_node_child(node, 0,
+			node3 = add_mi_node_child(node2, 0,
 				"callee_bind_addr",16,
-				dlg->legs[i].bind_addr->sock_str.s, 
+				dlg->legs[i].bind_addr->sock_str.s,
 				dlg->legs[i].bind_addr->sock_str.len);
 		} else {
-			node1 = add_mi_node_child(node, 0,
+			node3 = add_mi_node_child(node2, 0,
 				"callee_bind_addr",16,0,0);
 		}
-		if(node1 == 0)
+		if(node3 == 0)
 			goto error;
 	}
 
@@ -1034,16 +1089,52 @@ static inline int internal_mi_print_dlg(struct mi_node *rpl,
 		node1 = add_mi_node_child(node, 0, "context", 7, 0, 0);
 		if(node1 == 0)
 			goto error;
-		/* print dlg values -> iterate the list */
-		for( dv=dlg->vals ; dv ; dv=dv->next) {
-			addf_mi_node_child(node1, MI_DUP_VALUE, MI_SSTR("value"),
-				"%.*s = %.*s",dv->name.len,dv->name.s,dv->val.len,dv->val.s);
+		if (dlg->vals) {
+			node2 = add_mi_node_child(node1, 0, "values", 6, 0, 0);
+			if(node2 == 0)
+				goto error;
+			/* print dlg values -> iterate the list */
+			for( dv=dlg->vals ; dv ; dv=dv->next) {
+				/* escape non-printable chars */
+				p = pkg_realloc(dlg_val_buf, 4 * dv->val.len + 1);
+				if (!p) {
+					LM_ERR("not enough mem to allocate: %d\n", dv->val.len);
+					continue;
+				}
+				for (i = 0, j = 0; i < dv->val.len; i++) {
+					if (dv->val.s[i] < 0x20 || dv->val.s[i] >= 0x7F) {
+						p[j++] = '\\';
+						switch ((unsigned char)dv->val.s[i]) {
+						case 0x8: p[j++] = 'b'; break;
+						case 0x9: p[j++] = 't'; break;
+						case 0xA: p[j++] = 'n'; break;
+						case 0xC: p[j++] = 'f'; break;
+						case 0xD: p[j++] = 'r'; break;
+						default:
+							p[j++] = 'x';
+							j += snprintf(&p[j], 3, "%02x",
+									(unsigned char)dv->val.s[i]);
+							break;
+						}
+					} else {
+						p[j++] = dv->val.s[i];
+					}
+				}
+				add_mi_node_child(node2, MI_DUP_NAME|MI_DUP_VALUE,dv->name.s,dv->name.len,
+					p,j);
+				dlg_val_buf = p;
+			}
 		}
 		/* print dlg profiles */
-		for( dl=dlg->profile_links ; dl ; dl=dl->next) {
-			addf_mi_node_child(node1, MI_DUP_VALUE, MI_SSTR("profile"),
-				"%.*s = %.*s",dl->profile->name.len,dl->profile->name.s,
-				dl->value.len,ZSW(dl->value.s));
+		if (dlg->profile_links) {
+			node3 = add_mi_node_child(node1, MI_IS_ARRAY, "profiles", 8, 0, 0);
+			if(node3 == 0)
+				goto error;
+			for( dl=dlg->profile_links ; dl ; dl=dl->next) {
+				add_mi_node_child(node3, MI_DUP_NAME|MI_DUP_VALUE,
+					dl->profile->name.s,dl->profile->name.len,
+					ZSW(dl->value.s),dl->value.len);
+			}
 		}
 		/* print external context info */
 		run_dlg_callbacks( DLGCB_MI_CONTEXT, dlg, NULL,
@@ -1110,7 +1201,7 @@ error:
 }
 
 
-static int match_downstream_dialog(struct dlg_cell *dlg, 
+static int match_downstream_dialog(struct dlg_cell *dlg,
 													str *callid, str *ftag)
 {
 	if (dlg->callid.len!=callid->len ||
@@ -1168,6 +1259,9 @@ static inline struct mi_root* process_mi_params(struct mi_root *cmd_tree,
 
 	*idx = *cnt = 0;
 
+        if (!p1->s)
+                return init_mi_tree( 400, "Invalid Call-ID specified", 25);
+
 	h_entry = dlg_hash( p1/*callid*/ );
 
 	d_entry = &(d_table->entries[h_entry]);
@@ -1206,6 +1300,7 @@ struct mi_root * mi_print_dlgs(struct mi_root *cmd_tree, void *param )
 	if (rpl_tree==0)
 		goto error;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	if (dlg==NULL) {
 		if ( internal_mi_print_dlgs(rpl_tree, rpl, 0, idx, cnt)!=0 )
@@ -1243,6 +1338,7 @@ struct mi_root * mi_print_dlgs_ctx(struct mi_root *cmd_tree, void *param )
 	if (rpl_tree==0)
 		goto error;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	if (dlg==NULL) {
 		if ( internal_mi_print_dlgs(rpl_tree, rpl, 1, idx, cnt)!=0 )

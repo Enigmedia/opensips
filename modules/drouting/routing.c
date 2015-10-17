@@ -214,8 +214,8 @@ error:
 }
 
 
-int add_carrier(int db_id, char *id, int flags, char *gwlist, char *attrs,
-															rt_data_t *rd)
+int add_carrier(char *id, int flags, char *gwlist, char *attrs,
+													int state, rt_data_t *rd)
 {
 	pcr_t *cr = NULL;
 	unsigned int i;
@@ -247,8 +247,15 @@ int add_carrier(int db_id, char *id, int flags, char *gwlist, char *attrs,
 	}
 
 	/* copy integer fields */
-	cr->db_id = db_id;
 	cr->flags = flags;
+
+	/* set state */
+	if (state!=0)
+		/* disabled */
+		cr->flags |= DR_CR_FLAG_IS_OFF;
+	else
+		/* enabled */
+		cr->flags &= ~DR_CR_FLAG_IS_OFF;
 
 	/* copy id */
 	cr->id.s = (char*)(cr+1);
@@ -414,7 +421,7 @@ add_dst(
 	rt_data_t *r,
 	/* id */
 	char *id,
-	/* ip address */ 
+	/* ip address */
 	char* ip,
 	/* strip len */
 	int strip,
@@ -425,8 +432,11 @@ add_dst(
 	/* dst attrs*/
 	char* attrs,
 	/* probe_mode */
-	int probing
-
+	int probing,
+	/* socket */
+	struct socket_info *sock,
+	/* state */
+	int state
 	)
 {
 	static unsigned id_counter = 0;
@@ -495,20 +505,36 @@ add_dst(
 	}
 	memset(pgw,0,sizeof(pgw_t));
 
-	switch(probing)
-	{
-	case 0:
-		pgw->flags = 0;
-		break;
-	case 1:
-		pgw->flags =  DR_DST_PING_DSBL_FLAG;
-		break;
-	case 2:
-		pgw->flags =  DR_DST_PING_PERM_FLAG;
-		break;
-	default:
-		goto err_exit;
+	/* set probing related flags  */
+	switch(probing) {
+		case 0:
+			break;
+		case 1:
+			pgw->flags |=  DR_DST_PING_DSBL_FLAG;
+			break;
+		case 2:
+			pgw->flags |=  DR_DST_PING_PERM_FLAG;
+			break;
+		default:
+			goto err_exit;
 	}
+
+	/* set state related flags  */
+	switch(state) {
+		case 0:
+			break;
+		case 1:
+			pgw->flags |=  DR_DST_STAT_DSBL_FLAG|DR_DST_STAT_NOEN_FLAG;
+			break;
+		case 2:
+			pgw->flags |=  DR_DST_STAT_DSBL_FLAG;
+			break;
+		default:
+			goto err_exit;
+	}
+
+	/* set outbound socket */
+	pgw->sock = sock;
 
 	pgw->_id = ++id_counter;
 
@@ -607,7 +633,7 @@ void del_carriers_list(
 	}
 }
 
-void 
+void
 free_rt_data(
 		rt_data_t* rt_data,
 		int all

@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -60,6 +60,11 @@
 
 #define E_BAD_SERVER	  -500		/*!< error in server */
 
+#define report_programming_bug(format, args...) \
+	LM_CRIT("\n>>> " format"\nIt seems you have hit a programming bug.\n" \
+			"Please help us make OpenSIPS better by reporting it at " \
+			"https://github.com/OpenSIPS/opensips/issues\n\n", ##args);
+#define LM_BUG report_programming_bug
 
 #define MAX_REASON_LEN	128
 
@@ -72,7 +77,7 @@ extern int prev_ser_error;
 struct sip_msg;
 
 /*! \brief ser error -> SIP error */
-int err2reason_phrase( int ser_error, int *sip_error, 
+int err2reason_phrase( int ser_error, int *sip_error,
                 char *phrase, int etl, char *signature );
 
 /*! \brief SIP error core -> SIP text */

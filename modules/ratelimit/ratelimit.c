@@ -18,15 +18,15 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
  * ---------
  *
  * 2008-01-10 ported from SER project (osas)
- * 2008-01-16 ported enhancements from openims project (osas) 
+ * 2008-01-16 ported enhancements from openims project (osas)
  */
 
 #include <stdio.h>
@@ -104,13 +104,13 @@ static cmd_export_t cmds[] = {
 		fixup_rl_check, 0, REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|
 			BRANCH_ROUTE|ERROR_ROUTE|LOCAL_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"rl_check", (cmd_function)w_rl_check_3, 3,
-		fixup_rl_check, 0, REQUEST_ROUTE|LOCAL_ROUTE|ONREPLY_ROUTE|
+		fixup_rl_check, 0, REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|
 			BRANCH_ROUTE|ERROR_ROUTE|LOCAL_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"rl_dec_count", (cmd_function)w_rl_dec, 1,
-		fixup_spve_null, 0, REQUEST_ROUTE|LOCAL_ROUTE|ONREPLY_ROUTE|
+		fixup_spve_null, 0, REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|
 			BRANCH_ROUTE|ERROR_ROUTE|LOCAL_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"rl_reset_count", (cmd_function)w_rl_reset, 1,
-		fixup_spve_null, 0, REQUEST_ROUTE|LOCAL_ROUTE|ONREPLY_ROUTE|
+		fixup_spve_null, 0, REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|
 			BRANCH_ROUTE|ERROR_ROUTE|LOCAL_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{0,0,0,0,0,0}
 };
@@ -160,7 +160,7 @@ struct module_exports exports= {
 /* not using /proc/loadavg because it only works when our_timer_interval == theirs */
 int get_cpuload(void)
 {
-	static 
+	static
 	long long o_user, o_nice, o_sys, o_idle, o_iow, o_irq, o_sirq, o_stl;
 	long long n_user, n_nice, n_sys, n_idle, n_iow, n_irq, n_sirq, n_stl;
 	static int first_time = 1;
@@ -181,29 +181,29 @@ int get_cpuload(void)
 	if (first_time) {
 		first_time = 0;
 		*rl_load_value = 0;
-	} else {		
-		long long d_total =	(n_user - o_user)	+ 
-					(n_nice	- o_nice)	+ 
-					(n_sys	- o_sys)	+ 
-					(n_idle	- o_idle)	+ 
-					(n_iow	- o_iow)	+ 
-					(n_irq	- o_irq)	+ 
-					(n_sirq	- o_sirq)	+ 
+	} else {
+		long long d_total =	(n_user - o_user)	+
+					(n_nice	- o_nice)	+
+					(n_sys	- o_sys)	+
+					(n_idle	- o_idle)	+
+					(n_iow	- o_iow)	+
+					(n_irq	- o_irq)	+
+					(n_sirq	- o_sirq)	+
 					(n_stl	- o_stl);
 		long long d_idle =	(n_idle - o_idle);
 
 		*rl_load_value = 1.0 - ((double)d_idle) / (double)d_total;
 	}
 
-	o_user	= n_user; 
-	o_nice	= n_nice; 
-	o_sys	= n_sys; 
-	o_idle	= n_idle; 
-	o_iow	= n_iow; 
-	o_irq	= n_irq; 
-	o_sirq	= n_sirq; 
+	o_user	= n_user;
+	o_nice	= n_nice;
+	o_sys	= n_sys;
+	o_idle	= n_idle;
+	o_iow	= n_iow;
+	o_irq	= n_irq;
+	o_sirq	= n_sirq;
 	o_stl	= n_stl;
-	
+
 	return 0;
 }
 
@@ -228,8 +228,8 @@ void do_update_load(void)
 	dif_err = err - last_err;
 
 	/*
-	 * TODO?: the 'if' is needed so low cpu loads for 
-	 * long periods (which can't be compensated by 
+	 * TODO?: the 'if' is needed so low cpu loads for
+	 * long periods (which can't be compensated by
 	 * negative drop rates) don't confuse the controller
 	 *
 	 * NB: - "err < 0" means "desired_cpuload < actual_cpuload"
@@ -238,8 +238,8 @@ void do_update_load(void)
 	if (int_err < 0 || err < 0)
 		int_err += err;
 
-	output =	(*pid_kp) * err + 
-				(*pid_ki) * int_err + 
+	output =	(*pid_kp) * err +
+				(*pid_ki) * int_err +
 				(*pid_kd) * dif_err;
 	last_err = err;
 
@@ -270,7 +270,7 @@ static int mod_init(void)
 	unsigned int n;
 
 	LM_INFO("Ratelimit module - initializing ...\n");
-	
+
 	if (rl_timer_interval < 0) {
 		LM_ERR("invalid timer interval\n");
 		return -1;
@@ -384,11 +384,11 @@ void mod_destroy(void)
 /* this is here to avoid using rand() ... which doesn't _always_ return
  * exactly what we want (see NOTES section in 'man 3 rand')
  */
-int hash[100] = {18, 50, 51, 39, 49, 68, 8, 78, 61, 75, 53, 32, 45, 77, 31, 
-	12, 26, 10, 37, 99, 29, 0, 52, 82, 91, 22, 7, 42, 87, 43, 73, 86, 70, 
-	69, 13, 60, 24, 25, 6, 93, 96, 97, 84, 47, 79, 64, 90, 81, 4, 15, 63, 
-	44, 57, 40, 21, 28, 46, 94, 35, 58, 11, 30, 3, 20, 41, 74, 34, 88, 62, 
-	54, 33, 92, 76, 85, 5, 72, 9, 83, 56, 17, 95, 55, 80, 98, 66, 14, 16, 
+int hash[100] = {18, 50, 51, 39, 49, 68, 8, 78, 61, 75, 53, 32, 45, 77, 31,
+	12, 26, 10, 37, 99, 29, 0, 52, 82, 91, 22, 7, 42, 87, 43, 73, 86, 70,
+	69, 13, 60, 24, 25, 6, 93, 96, 97, 84, 47, 79, 64, 90, 81, 4, 15, 63,
+	44, 57, 40, 21, 28, 46, 94, 35, 58, 11, 30, 3, 20, 41, 74, 34, 88, 62,
+	54, 33, 92, 76, 85, 5, 72, 9, 83, 56, 17, 95, 55, 80, 98, 66, 14, 16,
 	38, 71, 23, 2, 67, 36, 65, 27, 1, 19, 59, 89, 48};
 
 
@@ -431,6 +431,7 @@ struct mi_root* mi_stats(struct mi_root* cmd_tree, void* param)
 {
 	struct mi_root *rpl_tree;
 	struct mi_node *node=NULL, *rpl=NULL;
+	struct mi_attr *attr;
 	int len;
 	char * p;
 
@@ -440,15 +441,19 @@ struct mi_root* mi_stats(struct mi_root* cmd_tree, void* param)
 	if (rpl_tree==0)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	if (rl_stats(rpl_tree, &node->value)) {
 		LM_ERR("cannoti mi print values\n");
 		goto free;
 	}
 
+	if (!(node = add_mi_node_child(rpl, 0, "PIPE", 4, NULL, 0)))
+		goto free;
+
 	LOCK_GET(rl_lock);
 	p = int2str((unsigned long)(*drop_rate), &len);
-	if (!(node = add_mi_node_child(rpl, MI_DUP_VALUE, "DROP_RATE", 9, p, len))) {
+	if (!(attr = add_mi_attr(node, MI_DUP_VALUE, "drop_rate", 9, p, len))) {
 		LOCK_RELEASE(rl_lock);
 		goto free;
 	}

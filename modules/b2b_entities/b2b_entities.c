@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -167,7 +167,7 @@ static int mod_init(void)
 	 * if authentication is required */
 	if(load_uac_auth_api(&uac_auth_api)<0)
 	{
-		LM_DBG("authentication functionality disabled:"
+		LM_INFO("authentication functionality disabled:"
 				" load uac_auth first to enable it\n");
 		uac_auth_loaded = 0;
 	}
@@ -176,7 +176,7 @@ static int mod_init(void)
 		uac_auth_loaded = 1;
 	}
 
-	/* initialize the hash tables; they will be allocated in shared memory 
+	/* initialize the hash tables; they will be allocated in shared memory
 	 * to be accesible by all processes */
 	if(init_b2b_htables()< 0)
 	{
@@ -230,7 +230,7 @@ static int mod_init(void)
 			b2be_dbf.close(b2be_db);
 		b2be_db = NULL;
 	}
-	else 
+	else
 		b2be_db_mode = 0;
 
 	if(register_script_cb( b2b_prescript_f, PRE_SCRIPT_CB|REQ_TYPE_CB, 0 ) < 0)
@@ -499,7 +499,7 @@ static inline int mi_print_b2be_dlg(struct mi_node *rpl, b2b_table htable, unsig
 	char* p;
 	b2b_dlg_t* dlg;
 	dlg_leg_t* leg;
-	struct mi_node *node=NULL, *node1=NULL;
+	struct mi_node *node=NULL, *node1=NULL, *node_l=NULL;
 	struct mi_attr* attr;
 
 	for(i = 0; i< hsize; i++)
@@ -625,29 +625,32 @@ static inline int mi_print_b2be_dlg(struct mi_node *rpl, b2b_table htable, unsig
 					if(attr == NULL) goto error;
 			}
 
-			leg=dlg->legs;
-			while(leg)
-			{
-				p = int2str((unsigned long)(leg->id), &len);
-				node1 = add_mi_node_child(node, MI_DUP_VALUE, "leg", 3, p, len);
-				if(node1 == NULL) goto error;
-				attr = add_mi_attr(node1, MI_DUP_VALUE, "tag", 3,
-						leg->tag.s, leg->tag.len);
-				if(attr == NULL) goto error;
-				p = int2str((unsigned long)(leg->cseq), &len);
-				attr = add_mi_attr(node1, MI_DUP_VALUE, "cseq", 4, p, len);
-				if(attr == NULL) goto error;
-				attr = add_mi_attr(node1, MI_DUP_VALUE, "contact", 7,
-						leg->contact.s, leg->contact.len);
-				if(attr == NULL) goto error;
-				if(leg->route_set.len)
+			if ( (leg=dlg->legs)!=NULL ) {
+				node_l = add_mi_node_child(node, MI_IS_ARRAY, "LEGS", 4, NULL, 0);
+				if(node_l == NULL) goto error;
+				while(leg)
 				{
-					attr = add_mi_attr(node1, MI_DUP_VALUE, "route_set", 8,
-						leg->route_set.s, leg->route_set.len);
+					p = int2str((unsigned long)(leg->id), &len);
+					node1 = add_mi_node_child(node_l, MI_DUP_VALUE, "leg", 3, p, len);
+					if(node1 == NULL) goto error;
+					attr = add_mi_attr(node1, MI_DUP_VALUE, "tag", 3,
+							leg->tag.s, leg->tag.len);
 					if(attr == NULL) goto error;
-				}
+					p = int2str((unsigned long)(leg->cseq), &len);
+					attr = add_mi_attr(node1, MI_DUP_VALUE, "cseq", 4, p, len);
+					if(attr == NULL) goto error;
+					attr = add_mi_attr(node1, MI_DUP_VALUE, "contact", 7,
+							leg->contact.s, leg->contact.len);
+					if(attr == NULL) goto error;
+					if(leg->route_set.len)
+					{
+						attr = add_mi_attr(node1, MI_DUP_VALUE, "route_set", 8,
+							leg->route_set.s, leg->route_set.len);
+						if(attr == NULL) goto error;
+					}
 
-				leg=leg->next;
+					leg=leg->next;
+				}
 			}
 
 			dlg = dlg->next;
@@ -669,6 +672,7 @@ static struct mi_root* mi_b2be_list(struct mi_root* cmd, void* param)
 	rpl_tree = init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
 	if (rpl_tree==NULL) return NULL;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	if (server_htable)
 		if (mi_print_b2be_dlg(rpl, server_htable, server_hsize)!=0)

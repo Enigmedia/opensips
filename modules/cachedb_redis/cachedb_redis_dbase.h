@@ -30,7 +30,7 @@
 #include "../../cachedb/cachedb.h"
 
 typedef struct cluster_nodes {
-	char ip[16];					/* ip of this cluster node */
+	char *ip;							/* ip of this cluster node */
 	short port;						/* port of this cluster node */
 	unsigned short start_slot;		/* first slot for this server */
 	unsigned short end_slot;		/* last slot for this server */
@@ -47,6 +47,7 @@ typedef struct {
 	struct cachedb_pool_con_t *next;
 
 	int type; /* single node or cluster node */
+	unsigned short slots_assigned; /* total slots for cluster */
 	cluster_node *nodes; /* one or more Redis nodes */
 } redis_con;
 
@@ -58,6 +59,7 @@ int redis_remove(cachedb_con *con,str *attr);
 int redis_add(cachedb_con *con,str *attr,int val,int expires,int *new_val);
 int redis_sub(cachedb_con *con,str *attr,int val,int expires,int *new_val);
 int redis_get_counter(cachedb_con *connection,str *attr,int *val);
+int redis_raw_query(cachedb_con *connection,str *attr,cdb_raw_entry ***reply,int expected_kv_no,int *reply_no);
 
 #endif /* CACHEDBREDIS_DBASE_H */
 

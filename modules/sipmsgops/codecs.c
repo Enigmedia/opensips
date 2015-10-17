@@ -122,7 +122,7 @@ static int create_codec_lumps(struct sip_msg * msg)
 					cur_cell->payloads.len,0);
 
 			lumps[count] = l;
-			
+
 			if( l == NULL)
 			{
 				LM_ERR("Error adding delete lump for m=\n");
@@ -559,6 +559,15 @@ static int stream_process(struct sip_msg * msg, struct sdp_stream_cell *cell,
 					{
 						cur++;
 						found.len++;
+					}
+
+					/* when trimming the very last payload, avoid trailing ws */
+					if (cur == lmp->u.value + lmp->len) {
+						tmp = found.s;
+						while (*(--tmp) == ' ') {
+							found.s--;
+							found.len++;
+						}
 					}
 
 					/* delete the string and update iterators */

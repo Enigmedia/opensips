@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -33,7 +33,7 @@
  */
 
 /*!
- * \file 
+ * \file
  * \brief SIP routing engine - structure helping functions
  */
 
@@ -92,14 +92,16 @@ error:
 
 
 
-struct action* mk_action(int type, int n, action_elem_t *elem, int line)
+struct action* mk_action(int type, int n, action_elem_t *elem,
+														int line, char *file)
 {
 	int i;
 	struct action* a;
-	
+
 	if(n>MAX_ACTION_ELEMS)
 	{
-		LM_ERR("too many action elements at line %d for %d", line, type);
+		LM_ERR("too many action elements at %s:%d for %d",
+			file, line, type);
 		return 0;
 	}
 
@@ -117,9 +119,10 @@ struct action* mk_action(int type, int n, action_elem_t *elem, int line)
 	}
 
 	a->line = line;
+	a->file = file;
 	a->next=0;
 	return a;
-	
+
 error:
 	LM_CRIT("pkg memory allocation failure\n");
 	return 0;
@@ -132,7 +135,7 @@ struct action* append_action(struct action* a, struct action* b)
 	struct action *t;
 	if (b==0) return a;
 	if (a==0) return b;
-	
+
 	for(t=a;t->next;t=t->next);
 	t->next=b;
 	return a;
@@ -258,7 +261,7 @@ void print_expr(struct expr* exp)
 				LM_DBG("<UNKNOWN[%d]>", exp->op);
 		}
 		switch(exp->right.type){
-			case NOSUBTYPE: 
+			case NOSUBTYPE:
 					/* LM_DBG("N/A"); */
 					break;
 			case STRING_ST:
@@ -307,7 +310,7 @@ void print_expr(struct expr* exp)
 					print_expr(exp->right.v.expr);
 					LM_DBG(" )");
 					break;
-			case NOT_OP:	
+			case NOT_OP:
 					LM_DBG("NOT( ");
 					print_expr(exp->left.v.expr);
 					LM_DBG(" )");
@@ -395,7 +398,7 @@ void print_expr(struct expr* exp)
 			default:
 					LM_DBG("UNKNOWN_EXP[%d] ", exp->op);
 		}
-					
+
 	}else{
 		LM_ERR("unknown type\n");
 	}
@@ -625,13 +628,64 @@ void print_action(struct action* t)
 	else	LM_DBG("); ");
 
 }
-			
+
 void print_actions(struct action* a)
 {
 	while(a) {
 		print_action(a);
 		a = a->next;
 	}
-}	
+}
 
 
+static int is_mod_func_in_expr(struct expr *e, char *name, int param_no)
+{
+	if (e->type==ELEM_T) {
+		if (e->left.type==ACTION_O)
+			if (is_mod_func_used((struct action*)e->right.v.data,name,param_no)==1)
+				return 1;
+	} else if (e->type==EXP_T) {
+		if (e->left.v.expr && is_mod_func_in_expr(e->left.v.expr,name,param_no)==1)
+			return 1;
+		if (e->right.v.expr && is_mod_func_in_expr(e->right.v.expr,name,param_no)==1)
+			return 1;
+	}
+	return 0;
+}
+
+
+int is_mod_func_used(struct action *a, char *name, int param_no)
+{
+	cmd_export_t *cmd;
+	while(a) {
+		if (a->type==MODULE_T) {
+			/* first param is the name of the function */
+			cmd = (cmd_export_t*)a->elem[0].u.data;
+			LM_DBG("checking %s against %s\n",name,cmd->name);
+			if (strcasecmp(cmd->name, name)==0 &&
+			(param_no==cmd->param_no || param_no==-1) )
+				return 1;
+		}
+
+		if (a->type==IF_T || a->type==WHILE_T)
+			if (is_mod_func_in_expr((struct expr*)a->elem[0].u.data,name,param_no)==1)
+				return 1;
+
+		/* follow all leads from actions than may have sub-blocks of instructions */
+		if (a->elem[0].type==ACTIONS_ST)
+				if (is_mod_func_used((struct action*)a->elem[0].u.data,name,param_no)==1)
+					return 1;
+
+		if (a->elem[1].type==ACTIONS_ST)
+				if (is_mod_func_used((struct action*)a->elem[1].u.data,name,param_no)==1)
+					return 1;
+
+		if (a->elem[2].type==ACTIONS_ST)
+				if (is_mod_func_used((struct action*)a->elem[2].u.data,name,param_no)==1)
+					return 1;
+
+		a = a->next;
+	}
+
+	return 0;
+}

@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * version and compile flags macros 
+ * version and compile flags macros
  *
  * Copyright (C) 2004 FhG Fokus
  *
@@ -17,18 +17,18 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef version_h
 #define version_h
 
-#define OPENSIPS_FULL_VERSION  NAME " " VERSION " (" ARCH "/" OS ")" 
+#define OPENSIPS_FULL_VERSION  NAME " " VERSION " (" ARCH "/" OS ")"
 
 
-#ifdef STATS
+#ifdef STATISTICS
 #define STATS_STR  "STATS: On"
 #else
 #define STATS_STR  "STATS: Off"
@@ -48,7 +48,7 @@
 
 #ifdef USE_TLS
 #define USE_TLS_STR ", USE_TLS"
-#else 
+#else
 #define USE_TLS_STR ""
 #endif
 
@@ -117,6 +117,12 @@
 #define F_MALLOC_STR ", F_MALLOC"
 #else
 #define F_MALLOC_STR ""
+#endif
+
+#ifdef HP_MALLOC
+#define HP_MALLOC_STR ", HP_MALLOC"
+#else
+#define HP_MALLOC_STR ""
 #endif
 
 #ifdef USE_SHM_MEM
@@ -197,9 +203,9 @@
 	STATS_STR EXTRA_DEBUG_STR USE_IPV6_STR USE_TCP_STR USE_TLS_STR \
 	USE_SCTP_STR DISABLE_NAGLE_STR USE_MCAST_STR NO_DEBUG_STR NO_LOG_STR \
 	SHM_MEM_STR SHM_MMAP_STR PKG_MALLOC_STR VQ_MALLOC_STR F_MALLOC_STR \
-	USE_SHM_MEM_STR DBG_QM_MALLOC_STR DBG_F_MALLOC_STR DEBUG_DMALLOC_STR \
-	QM_JOIN_FREE_STR FAST_LOCK_STR NOSMP_STR USE_PTHREAD_MUTEX_STR \
-	USE_POSIX_SEM_STR USE_SYSV_SEM_STR
+	HP_MALLOC_STR USE_SHM_MEM_STR DBG_QM_MALLOC_STR DBG_F_MALLOC_STR \
+	DEBUG_DMALLOC_STR QM_JOIN_FREE_STR FAST_LOCK_STR NOSMP_STR \
+	USE_PTHREAD_MUTEX_STR USE_POSIX_SEM_STR USE_SYSV_SEM_STR
 
 
 #endif

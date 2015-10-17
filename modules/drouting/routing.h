@@ -50,7 +50,7 @@ typedef struct hb_ {
 
 /* routing data is comprised of:
 	- a list of PSTN gw
-	- a hash over routing groups containing 
+	- a hash over routing groups containing
 	pointers to the coresponding prefix trees
 */
 typedef struct rt_data_ {
@@ -69,10 +69,7 @@ typedef struct _dr_group {
 	int type;
 	union {
 		unsigned int grp_id;
-		struct _avp_id{
-			int name;
-			unsigned short type;
-		}avp_id;
+		int avp_name;
 	}u;
 } dr_group_t;
 
@@ -83,11 +80,11 @@ build_rt_data( void );
 
 int
 add_carrier(
-	int db_id,
 	char *id,
 	int flags,
 	char *gwlist,
 	char *attrs,
+	int state,
 	rt_data_t *rd
 	);
 
@@ -97,7 +94,7 @@ add_dst(
 	rt_data_t*,
 	/* id */
 	char *,
-	/* ip address */ 
+	/* ip address */
 	char*,
 	/* strip len */
 	int,
@@ -108,6 +105,10 @@ add_dst(
 	/* dst attrs*/
 	char*,
 	/* probe_mode */
+	int,
+	/* socket */
+	struct socket_info*,
+	/* state */
 	int
 	);
 

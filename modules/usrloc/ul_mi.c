@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -95,10 +95,11 @@ static inline int mi_add_aor_node(struct mi_node *parent, urecord_t* r, time_t t
 	struct mi_node *node;
 	struct mi_attr *attr;
 	ucontact_t* c;
+	str st;
 	char *p;
 	int len;
 
-	anode = add_mi_node_child( parent, MI_DUP_VALUE, "AOR", 3,
+	anode = add_mi_node_child( parent, MI_IS_ARRAY|MI_DUP_VALUE, "AOR", 3,
 			r->aor.s, r->aor.len);
 	if (anode==0)
 		return -1;
@@ -189,8 +190,8 @@ static inline int mi_add_aor_node(struct mi_node *parent, urecord_t* r, time_t t
 			return -1;
 
 		/* cflags */
-		p = int2str((unsigned long)c->cflags, &len);
-		node = add_mi_node_child( cnode, MI_DUP_VALUE, "Cflags", 5, p, len);
+		st = bitmask_to_flag_list(FLAG_TYPE_BRANCH, c->cflags);
+		node = add_mi_node_child( cnode, MI_DUP_VALUE, "Cflags", 6, st.s, st.len);
 		if (node==0)
 			return -1;
 
@@ -212,6 +213,22 @@ static inline int mi_add_aor_node(struct mi_node *parent, urecord_t* r, time_t t
 		node = add_mi_node_child( cnode, MI_DUP_VALUE, "Methods", 7, p, len);
 		if (node==0)
 			return -1;
+
+		/* additional information */
+		if (c->attr.len) {
+			node = add_mi_node_child( cnode, MI_DUP_VALUE, "Attr", 4,
+				c->attr.s, c->attr.len);
+			if (node==0)
+				return -1;
+		}
+
+		/* sip_instance */
+		if (c->instance.len && c->instance.s) {
+			node = add_mi_node_child( cnode, MI_DUP_VALUE, "SIP_instance", 12,
+				c->instance.s, c->instance.len);
+			if (node==0)
+				return -1;
+		}
 
 	} /* for */
 
@@ -247,7 +264,7 @@ struct mi_root* mi_usrloc_rm_aor(struct mi_root *cmd, void *param)
 		return init_mi_tree( 400, "Domain missing in AOR", 21);
 
 	lock_udomain( dom, aor);
-	if (delete_urecord( dom, aor, 0) < 0) {
+	if (delete_urecord( dom, aor, NULL, 0) < 0) {
 		unlock_udomain( dom, aor);
 		return init_mi_tree( 500, "Failed to delete AOR", 20);
 	}
@@ -304,12 +321,12 @@ struct mi_root* mi_usrloc_rm_contact(struct mi_root *cmd, void *param)
 		return init_mi_tree( 404, "Contact not found", 17);
 	}
 
-	if (delete_ucontact(rec, con) < 0) {
+	if (delete_ucontact(rec, con, 0) < 0) {
 		unlock_udomain( dom, aor);
 		return 0;
 	}
 
-	release_urecord(rec);
+	release_urecord(rec, 0);
 	unlock_udomain( dom, aor);
 	return init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
 }
@@ -332,7 +349,7 @@ struct mi_root* mi_usrloc_dump(struct mi_root *cmd, void *param)
 	int short_dump;
 	map_iterator_t it;
 	void ** dest;
-	
+
 	node = cmd->node.kids;
 	if (node && node->next)
 		return init_mi_tree( 400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN);
@@ -348,12 +365,14 @@ struct mi_root* mi_usrloc_dump(struct mi_root *cmd, void *param)
 	if (rpl_tree==NULL)
 		return 0;
 	rpl = &rpl_tree->node;
+	/* all domains go under this node as array */
+	rpl->flags |= MI_IS_ARRAY;
 	t = time(0);
 
 	for( dl=root ; dl ; dl=dl->next ) {
 		/* add a domain node */
-		node = add_mi_node_child( rpl, MI_NOT_COMPLETED, "Domain", 6,
-					dl->name.s, dl->name.len);
+		node = add_mi_node_child( rpl, MI_IS_ARRAY|MI_NOT_COMPLETED,
+					"Domain", 6, dl->name.s, dl->name.len);
 		if (node==0)
 			goto error;
 
@@ -423,7 +442,7 @@ struct mi_root* mi_usrloc_flush(struct mi_root *cmd, void *param)
 
 
 /*! \brief
- * Expects 7 nodes: 
+ * Expects 7 nodes:
  *        table name,
  *        AOR
  *        contact
@@ -502,7 +521,7 @@ struct mi_root* mi_usrloc_add(struct mi_root *cmd, void *param)
 
 	n = get_urecord( dom, aor, &r);
 	if ( n==1) {
-		if (insert_urecord( dom, aor, &r) < 0)
+		if (insert_urecord( dom, aor, &r, 0) < 0)
 			goto lock_error;
 		c = 0;
 	} else {
@@ -520,17 +539,17 @@ struct mi_root* mi_usrloc_add(struct mi_root *cmd, void *param)
 	if (c) {
 		/* update contact record */
 		ci.cseq = c->cseq;
-		if (update_ucontact( r, c, &ci) < 0)
+		if (update_ucontact( r, c, &ci, 0) < 0)
 			goto release_error;
 	} else {
 		/* new contact record */
 		ci.callid = &mi_ul_cid;
 		ci.cseq = MI_UL_CSEQ;
-		if ( insert_ucontact( r, contact, &ci, &c) < 0 )
+		if ( insert_ucontact( r, contact, &ci, &c, 0) < 0 )
 			goto release_error;
 	}
 
-	release_urecord(r);
+	release_urecord(r, 0);
 
 	unlock_udomain( dom, aor);
 
@@ -538,7 +557,7 @@ struct mi_root* mi_usrloc_add(struct mi_root *cmd, void *param)
 bad_syntax:
 	return init_mi_tree( 400, MI_BAD_PARM_S, MI_BAD_PARM_LEN);
 release_error:
-	release_urecord(r);
+	release_urecord(r, 0);
 lock_error:
 	unlock_udomain( dom, aor);
 	return init_mi_tree( 500, MI_INTERNAL_ERR_S, MI_INTERNAL_ERR_LEN);
@@ -604,10 +623,12 @@ struct mi_root* mi_usrloc_show_contact(struct mi_root *cmd, void *param)
 				if (rpl_tree==0)
 					goto error;
 				rpl = &rpl_tree->node;
+				rpl->flags |= MI_IS_ARRAY;
 			}
 
 			node = addf_mi_node_child( rpl, 0, "Contact", 7,
 				"<%.*s>;q=%s;expires=%d;flags=0x%X;cflags=0x%X;socket=<%.*s>;"
+				"callid=<%.*s>;"
 				"methods=0x%X"
 				"%s%.*s%s" /*received*/
 				"%s%.*s%s" /*user-agent*/
@@ -616,6 +637,7 @@ struct mi_root* mi_usrloc_show_contact(struct mi_root *cmd, void *param)
 				q2str(con->q, 0), (int)(con->expires - act_time),
 				con->flags, con->cflags,
 				use_sock_str.len,use_sock_str.s,
+				con->callid.len, ZSW(con->callid.s),
 				con->methods,
 				con->received.len?";received=<":"",con->received.len,
 					ZSW(con->received.s), con->received.len?">":"",

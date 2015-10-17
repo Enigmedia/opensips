@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -95,7 +95,7 @@ static pv_export_t mod_items[] = {
 
 struct module_exports exports= {
 	"statistics",		/* module's name */
-	MODULE_VERSION,	
+	MODULE_VERSION,
 	DEFAULT_DLFLAGS,	/* dlopen flags */
 	cmds,				/* exported functions */
 	mod_params,			/* param exports */
@@ -145,7 +145,7 @@ static int fixup_stat(void** param, int param_no)
 		/* reference to the statistic name */
 		sp = (struct stat_param *)pkg_malloc(sizeof(struct stat_param));
 		if (sp==NULL) {
-			LM_ERR("no more pkg mem (%ld)\n",sizeof(struct stat_param));
+			LM_ERR("no more pkg mem (%d)\n", (int)sizeof(struct stat_param));
 			return E_OUT_OF_MEM;
 		}
 		memset( sp, 0 , sizeof(struct stat_param) );
@@ -425,7 +425,7 @@ int pv_set_stat(struct sip_msg* msg, pv_param_t *param, int op,
 
 	if (val != 0)
 		LM_WARN("non-zero value - setting value to 0\n");
-	
+
 	reset_stat( stat );
 
 	return 0;

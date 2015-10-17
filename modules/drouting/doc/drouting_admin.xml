@@ -50,15 +50,15 @@
 	<itemizedlist>
 	<listitem>
 	<para>
-	routing info (destinations, carriers, rules, groups) are stored in a 
+	The routing info (destinations, carriers, rules, groups) is stored in a 
 	database and loaded into memory at start up time; reload at runtime via
-	an Management Interface command.
+	a Management Interface command.
 	</para>
 	</listitem>
 
 	<listitem>
 	<para>
-	weigth-based or random selection of the destinations (from a rule or
+	weight-based or random selection of the destinations (from a rule or
 	 from a carrier), failure detection of gateways (with switching to next
 	 available gateway).
 	</para>
@@ -73,7 +73,7 @@
 	
 	<listitem>
 	<para>
-	script integration - Pseudo variables support in functions; scripting
+	script integration - Pseudo-variable support in functions; scripting
 	route triggering when rules are matched
 	</para>
 	</listitem>
@@ -105,8 +105,7 @@
 	when dealing with a large number of routing rules.
 	</para>
 	<para>
-	The tests were performed with a set of 383000 rules and to values were
-	measured:
+	The tests were performed with a set of 383000 rules and measured:
 	</para>
 	<itemizedlist>
 	<listitem><para>time to load from DB</para></listitem>
@@ -139,7 +138,7 @@
 	<para>
 	These are the end SIP entities where actually the traffic needs to be sent
 	after routing. They are stored in a table called <quote>dr_gateways</quote>.
-	Gateway addresses are stored in a separate table because of need to access them
+	Gateway addresses are stored in a separate table because of the need to access them
 	independent of Dynamic Routing processing (e.g., adding/ removing gateway PRI
 	prefix before/after performing other operation -- receiving/relaying to gateway). 
 	</para>
@@ -202,8 +201,8 @@
 	<section>
 	<title>Routing Rules</title>
 	<para>
-	These are the actual rule which control the routing - like based on
-	different criterias (prefix, time, priority, etc) they will decide
+	These are the actual rules which control the routing. Using
+	different criterias (prefix, time, priority, etc), they will decide
 	to which gateways the call will be sent.
 	</para>
 	<para>
@@ -216,7 +215,7 @@
 	<itemizedlist>
 	<listitem><para>group (list of numbers) - rules can be grouped (a rule may
 	belong to multiple groups in the same time ) and you can
-	use only a certian group at a point; like having a <quote>premium</quote> or
+	use only a certain group at a point; like having a <quote>premium</quote> or
 	<quote>standard</quote> or <quote>interstate</quote> or 
 	<quote>intrastate</quote> groups of rules to be used in different 
 	cases</para></listitem>
@@ -224,13 +223,13 @@
 	matching this rule (longest prefix matching)</para></listitem>
 	<listitem><para>time validity (time recurrence string) - when this rule is
 	valid from time point of view (see RFC 2445)</para></listitem>
-	<listitem><para>priority (number) - prority off the rule - higher value, 
+	<listitem><para>priority (number) - priority of the rule - higher value, 
 	higher priority (see rule section alg)</para></listitem>
 	<listitem><para>script route ID (string) - if defined, then execute the 
 	route with the specified ID when this rule is matched. That's it, a route
 	which can be used to perform custom operations on message. NOTE that no 
 	modification is performed at signaling level and you must NOT do
-	any signalling operations in that script route</para></listitem>
+	any signaling operations in that script route</para></listitem>
 	<listitem><para>list of GWs/carriers (string) - a comma separated list
 	of gateways or carriers (defined by IDs) to be used for this rule; the 
 	carrier IDs are prefixed with <quote>#</quote> sign. For each ID (GW or
@@ -247,11 +246,11 @@
 	</para>
 	<itemizedlist>
 	<listitem><para>
-	A date-time expression that defines the time recurrence to match for
-	current rule. Time recurrences are based closely on the specification
-	of recurring intervals of time in the Internet Calendaring and Scheduling
+	A date-time expression that defines the time recurrence to be matched for
+	current rule. Time recurrences are based closely on the recurring time
+	intervals from the Internet Calendaring and Scheduling
 	Core Object Specification (calendar COS), RFC 2445. The set of attributes
-	used in routing rule specification is subset of time recurrence attributes.
+	used in routing rule specification is a subset of time recurrence attributes.
 	</para></listitem>
 	<listitem><para>
 	The value stored in database has the format of:
@@ -306,10 +305,9 @@
 	<listitem>
 	<para>
 	The rule must contain a chain of gateways and carriers. The module will 
-	execute serial forking for each address in chain (in which order the 
-	destinations will be tried, depends on the defintion order or depends on
-	the weights (weights selection must be enabled). The next address in chain
-	is used only if the previously has failed.
+	execute serial forking for each address in the chain (ordering is either done
+	by simply using the definition order or it may weight-based - weight selection must be
+	enabled). The next address in chain is used only if the previously has failed.
 	</para>
 	</listitem>
 	<listitem>
@@ -501,7 +499,7 @@ modparam("drouting", "drg_table", "groups")
 		be used directly by the routing rules.
 		</para>
 		<para>
-		<emphasis>	Default value is <quote>dr_gw_lists</quote>.
+		<emphasis>	Default value is <quote>dr_carriers</quote>.
 		</emphasis>
 		</para>
 		<example>
@@ -559,30 +557,6 @@ modparam("drouting", "gw_id_avp", '$avp(334)')
 		</example>
 	</section>
 
-
-	<section>
-		<title><varname>gw_attrs_avp</varname> (str)</title>
-		<para>
-		The name of the avp for storing the attributes of the current selected
-		destination/gateway - once a new destination is selected (via the 
-		use_next_gw() function), the AVP will be updated with the attrs of the
-		new used destination.
-		</para>
-		<para>
-		<emphasis>Default value is <quote>NULL</quote>.
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>gw_attrs_avp</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("drouting", "gw_attrs_avp", '$avp(gw_attrs)')
-modparam("drouting", "gw_attrs_avp", '$avp(67)')
-...
-	</programlisting>
-		</example>
-	</section>
-
 	<section>
 		<title><varname>gw_priprefix_avp</varname> (str)</title>
 		<para>
@@ -627,29 +601,6 @@ modparam("drouting", "rule_id_avp", '$avp(335)')
 		</example>
 	</section>
 
-
-	<section>
-		<title><varname>rule_attrs_avp</varname> (str)</title>
-		<para>
-		The name of the avp for storing the attributes of the current matched
-		routing rule (see dr_rules table).
-		</para>
-		<para>
-		<emphasis>Default value is <quote>NULL</quote>.
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>rule_attrs_avp</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("drouting", "rule_attrs_avp", '$avp(rule_attrs)')
-modparam("drouting", "rule_attrs_avp", '$avp(66)')
-...
-	</programlisting>
-		</example>
-	</section>
-
-
 	<section>
 		<title><varname>rule_prefix_avp</varname> (str)</title>
 		<para>
@@ -690,28 +641,6 @@ modparam("drouting", "carrier_id_avp", '$avp(carrier_id)')
 	</programlisting>
 		</example>
 	</section>
-
-
-	<section>
-		<title><varname>carrier_attrs_avp</varname> (str)</title>
-		<para>
-		AVP to be populate with the attributes string for the carrier the 
-		current GW belongs to.
-		</para>
-		<para>
-		<emphasis>Default value is <quote>NULL</quote>.
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>carrier_attrs_avp</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("drouting", "carrier_attrs_avp", '$avp(carrier_attrs)')
-...
-	</programlisting>
-		</example>
-	</section>
-
 
 	<section>
 		<title><varname>define_blacklist</varname> (str)</title>
@@ -775,6 +704,27 @@ modparam("drouting", "default_group", 4)
 modparam("drouting", "force_dns", 0)
 ...
 	</programlisting>
+		</example>
+	</section>
+
+	<section>
+		<title><varname>persistent_state</varname> (int)</title>
+		<para>
+		Specifies whether the <emphasis>state</emphasis> column
+		should be loaded at startup and flushed during runtime or not.
+		</para>
+		<para>
+		<emphasis>Default value is <quote>1</quote> (enabled).
+		</emphasis>
+		</para>
+		<example>
+		<title>Set the <varname>persistent_state</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+# disable all DB operations with the state of a gateway
+modparam("drouting", "persistent_state", 0)
+...
+</programlisting>
 		</example>
 	</section>
 
@@ -946,7 +896,7 @@ modparam("drouting", "drg_grpid_col", "grpid")
 	<title>Exported Functions</title>
 	<section>
 		<title>
-		<function moreinfo="none">do_routing([[[groupID],flags],gw_whitelist])</function>
+		<function moreinfo="none">do_routing([groupID], [flags], [gw_whitelist], [rule_attrs_pvar], [gw_attrs_pvar], [carrier_attrs_pvar])</function>
 		</title>
 		<para>
 		Function to trigger routing of the message according to the 
@@ -956,48 +906,85 @@ modparam("drouting", "drg_grpid_col", "grpid")
 		This function can be used from REQUEST_ROUTE, FAILURE_ROUTE and LOCAL_ROUTE.
 		</para>
 		<para>
-			The function can take two optional parameters:
+			All parameters are optional. Any of them may be ignored, provided
+			the necessary separation marks "," are properly placed.
 			<itemizedlist>
 				<listitem>
-					<emphasis>groupID</emphasis> - the routing group the
+					<para>
+					<emphasis role='bold'>groupID</emphasis> - the routing group the
 					caller belongs to - this may be a static numerical 
 					value or an AVP specification (value must be numerical 
 					type, string types are ignored!). If none specified, the
 					function will automatically try to query the dr_group 
 					table to get this information;
+				</para>
 				</listitem>
 				<listitem>
-					<emphasis>flags</emphasis> - Controlls the behavior of the
+					<para>
+					<emphasis role='bold'>flags</emphasis> - Controls the behavior of the
 					function. Possible flags are:
+				</para>
 					<itemizedlist>
 					<listitem>
-						<emphasis>W</emphasis> - Instead of using the destination
+					<para>
+						<emphasis role='bold'>W</emphasis> - Instead of using the destination
 						(from the rule definition) in the given order, sort them
 						based on their weight.
+					</para>
 					</listitem>
 					<listitem>
-						<emphasis>F</emphasis> - Enable rule fallback; normally
+					<para>
+						<emphasis role='bold'>F</emphasis> - Enable rule fallback; normally
 						the engine is using a single rule for routing a call; by
-						setting this flag, the enging will fallback and use
+						setting this flag, the engine will fallback and use
 						rules with less priority or shorter prefix when all the 
 						destination from the current rules failed.
+					</para>
 					</listitem>
 					<listitem>
-						<emphasis>L</emphasis> - Do strict lenght matching over the
+					<para>
+						<emphasis role='bold'>L</emphasis> - Do strict length matching over the
 						prefix - actually DR engine will do full number maching and 
 						not prefix matching anymore.
+					</para>
 					</listitem>
 					<listitem>
-						<emphasis>C</emphasis> - Only check if the dialed number 
+					<para>
+						<emphasis role='bold'>C</emphasis> - Only check if the dialed number 
 						matches any routing rule, without loading / applying any
 						routing info (no GW is set, the RURI is not altered)
+					</para>
 					</listitem>
 					</itemizedlist>
 				</listitem>
 				<listitem>
-					<emphasis>gw_whitelist</emphasis> - a comma separated white
-					list of gateways. This will force routing over this list of 
-					carriers or gateways (a subset of what found in the prefix rules).
+					<para>
+					<emphasis role='bold'>gw_whitelist</emphasis> - a comma separated white
+					list of gateways. This will force routing over, at most, this
+					list of carriers or gateways (in other words, the whitelist
+					will be intersected with the results of the search through the rules).
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>rule_attrs_pvar</emphasis> (output, optional)- a writable
+					pseudo-variable which will be populated with the attributes
+					of the matched dynamic routing rule.
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the matched gateway.
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>carrier_attrs_pvar </emphasis> (output, optional) - a writable
+					pseudo-variable which will be populated with the attributes
+					of the matched carrier.
+					</para>
 				</listitem>
 			</itemizedlist>
 		</para>
@@ -1016,10 +1003,10 @@ do_routing("0");
 do_routing("$avp(10)");
 ...
 # all groups, sort on weights
-do_routing("","W");
+do_routing("", "W");
 ...
-# group id 2, sort on order, fallback rule
-do_routing("2","F");
+# group id 2, sort on order, fallback rule and also return the gateway attributes
+do_routing("2", "F", , , "$var(gw_attributes)");
 ...
 </programlisting>
 		</example>
@@ -1027,7 +1014,7 @@ do_routing("2","F");
 
 	<section>
 		<title>
-		<function moreinfo="none">route_to_carrier(carrier_id)</function>
+		<function moreinfo="none">route_to_carrier(carrier_id, [gw_attrs_pvar], [carrier_attrs_pvar])</function>
 		</title>
 		<para>
 		Function to trigger the direct routing to a given carrier. In this case
@@ -1037,16 +1024,38 @@ do_routing("2","F");
 		<para>
 		This function can be used from REQUEST_ROUTE, FAILURE_ROUTE and LOCAL_ROUTE..
 		</para>
+
 		<para>
-		Function takes a single mandatory parameter, the ID of the carrier
-		to be used (variables are accepted).
+		<itemizedlist>
+				<listitem>
+					<para>
+					<emphasis role='bold'>carrier_id </emphasis> (mandatory) - the
+					ID (name) of the carrier to be used; pseudo-variables are accepted
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the currently matched gateway of this carrier.
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>carrier_attrs_pvar </emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with the attributes
+					of this carrier.
+					</para>
+				</listitem>
+		</itemizedlist>
 		</para>
 
 		<example>
 		<title><function>route_to_carrier</function> usage</title>
 		<programlisting format="linespecific">
 ...
-if ( route_to_carrier("my_top_carrier") ) {
+if ( route_to_carrier("my_top_carrier", , "$var(carrier_att)") ) {
+	xlog("Routing to \"my_top_carrier\" - $var(carrier_att)\n");
 	t_on_failure("next_gw");
 	t_relay();
 	exit;
@@ -1058,18 +1067,33 @@ if ( route_to_carrier("my_top_carrier") ) {
 
 	<section>
 		<title>
-		<function moreinfo="none">route_to_gw(gw_id)</function>
+		<function moreinfo="none">route_to_gw(gw_id, [gw_attrs_pvar])</function>
 		</title>
 		<para>
-		Function to trigger the direct routing to a given gateway. Attributes 
-		and per-gw preocessing will be available.
+		Function to trigger the direct routing to a given gateway (or list of gateways).
+		Attributes and per-gw preocessing will be available.
 		</para>
 		<para>
 		This function can be used from REQUEST_ROUTE, FAILURE_ROUTE and LOCAL_ROUTE.
 		</para>
+
 		<para>
-		Function takes a single mandatory parameter, the ID of the gateway
-		to be used (variables are accepted).
+		<itemizedlist>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_id </emphasis> (mandatory) - the
+					ID / comma-separated list of IDs of the gateway(s) to be used.
+					pseudo-variables are accepted
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the currently matched gateway.
+					</para>
+				</listitem>
+		</itemizedlist>
 		</para>
 
 		<example>
@@ -1081,36 +1105,8 @@ if ( route_to_gw("gw_europe") ) {
 	exit;
 }
 ...
-</programlisting>
-		</example>
-	</section>
-
-	<section>
-		<title>
-		<function moreinfo="none">use_next_gw()/next_routing()</function>
-		</title>
-		<para>
-		The function takes the next available destination (set by do_routing, 
-		as alternative destinations) and push it into RURI. Note that the 
-		function just sets the RURI (nothing more).
-		</para>
-		<para>
-		If a new RURI is set, the used destination is removed from the 
-		pending set of alternative destinations.
-		</para>
-		<para>
-		This function can be used from REQUEST_ROUTE, FAILURE_ROUTE and LOCAL_ROUTE.
-		</para>
-		<para>
-		The function returns true only if a new RURI was set. False
-		is returned is no other alternative destinations are found or in case
-		of internal processing error.
-		</para>
-		<example>
-		<title><function>use_next_gw</function> usage</title>
-		<programlisting format="linespecific">
-...
-if (use_next_gw()) {
+if ( route_to_gw("gw1,gw2,gw3", "$var(gw_attrs)") ) {
+	xlog("Relaying to first gateway from our list - $var(gw_attrs)\n");
 	t_relay();
 	exit;
 }
@@ -1121,10 +1117,79 @@ if (use_next_gw()) {
 
 	<section>
 		<title>
-		<function moreinfo="none">goes_to_gw([[type],flags])</function>
+		<function moreinfo="none">use_next_gw([rule_attrs_pvar], [gw_attrs_pvar], [carrier_attrs_pvar])/next_routing()</function>
 		</title>
 		<para>
-		Function returns true if the destination of the current request 
+		The function takes the next available destination (set by do_routing,
+		as alternative destinations) and pushes it into the RURI. Note that the
+		function just sets the RURI (nothing more).
+		</para>
+		<para>
+		If a new RURI is set, the used destination is removed from the
+		pending set of alternative destinations.
+		</para>
+		<para>
+		This function can be used from REQUEST_ROUTE, FAILURE_ROUTE and LOCAL_ROUTE.
+		</para>
+		<para>
+		The function returns true only if a new RURI was set. False
+		is returned is no other alternative destinations are found or in case
+		of an internal processing error. It may take the following optional parameters:
+		</para>
+
+		<para>
+		<itemizedlist>
+				<listitem>
+					<para>
+					<emphasis role='bold'>rule_attrs_pvar </emphasis> (output, optional) - a writable
+					pseudo-variable which will be populated with the attributes
+					of the matched dynamic routing rule.
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the matched gateway.
+					</para>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>carrier_attrs_pvar </emphasis> (output, optional) - a writable
+					pseudo-variable which will be populated with the attributes
+					of the matched carrier.
+					</para>
+				</listitem>
+		</itemizedlist>
+		</para>
+
+
+		<example>
+		<title><function>use_next_gw</function> usage</title>
+		<programlisting format="linespecific">
+...
+if (use_next_gw()) {
+	t_relay();
+	exit;
+}
+...
+# Also fetch the carrier attributes, if any
+if (use_next_gw(, , "$var(carrier_attrs)")) {
+	xlog("Carrier attributes of current gateway: $var(carrier_attrs)\n");
+	t_relay();
+	exit;
+}
+...
+</programlisting>
+		</example>
+	</section>
+
+	<section>
+		<title>
+		<function moreinfo="none">goes_to_gw([type], [flags], [gw_attrs_pvar])</function>
+		</title>
+		<para>
+		Function returns true if the destination of the current request
 		(destination URI or Request URI) points (as IP) to one of the gateways.
 		There no DNS lookups done if the domain part of the URI is not an IP.
 		</para>
@@ -1136,39 +1201,60 @@ if (use_next_gw()) {
 		and LOCAL_ROUTE.
 		</para>
 		<para>
-			The function can take two optional parameters:
+			All parameters are optional. Any of them may be ignored, provided
+			the necessary separation marks "," are properly placed.
 			<itemizedlist>
 				<listitem>
-					<emphasis>type</emphasis> (optional) - GW/destination 
-					type to be checked; a negative value (ex: -1) means
-					match any group;
+					<para>
+					<emphasis role='bold'>type</emphasis> (optional) - GW/destination 
+					type to be checked; when ommiting this parameter or specifying
+					a negative value i.e. "-1", matching will be done against all groups
+					</para>
 				</listitem>
 				<listitem>
-					<emphasis>flags</emphasis> (optional) - what operations
+					<para>
+					<emphasis role='bold'>flags</emphasis> (optional) - what operations
 					should be performed when a GW matches:
+					</para>
 					<itemizedlist>
 						<listitem>
-							<emphasis>'s'</emphasis> (Strip) - apply to the 
+							<para>
+							<emphasis role='bold'>'s'</emphasis> (Strip) - apply to the 
 							username of RURI the strip defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'p'</emphasis> (Prefix) - apply to the 
+							<para>
+							<emphasis role='bold'>'p'</emphasis> (Prefix) - apply to the 
 							username of RURI the prefix defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'a'</emphasis> (Attributes) - return
-							the attributes string defined by the GW into gw_attrs_avp
-							AVP
-						</listitem>
-						<listitem>
-							<emphasis>'i'</emphasis> (Gateway ID) - return the 
+							<para>
+							<emphasis role='bold'>'i'</emphasis> (Gateway ID) - return the 
 							gateway id into gw_id_avp AVP
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'n'</emphasis> (Ignore port) - ignores port
+							<para>
+							<emphasis role='bold'>'n'</emphasis> (Ignore port) - ignores port
 							number during matching
+							</para>
+						</listitem>
+						<listitem>
+							<para>
+							<emphasis role='bold'>'c'</emphasis> (Carrier ID) - return the
+							carrier id into carrier_id_avp AVP
+							</para>
 						</listitem>
 					</itemizedlist>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the matched gateway.
+					</para>
 				</listitem>
 			</itemizedlist>
 		</para>
@@ -1176,7 +1262,7 @@ if (use_next_gw()) {
 		<title><function>goes_to_gw</function> usage</title>
 		<programlisting format="linespecific">
 ...
-if (goes_to_gw("1")) {
+if (goes_to_gw("1", , "$var(gw_attrs)")) {
 	sl_send_reply("403","Forbidden");
 	exit;
 }
@@ -1187,7 +1273,7 @@ if (goes_to_gw("1")) {
 
 	<section>
 		<title>
-		<function moreinfo="none">is_from_gw( [type, [flag]])</function>
+		<function moreinfo="none">is_from_gw([type], [flag], [gw_attrs_pvar])</function>
 		</title>
 		<para>
 		The function checks if the sender of the message is a gateway
@@ -1198,39 +1284,60 @@ if (goes_to_gw("1")) {
 		and ONREPLY_ROUTE.
 		</para>
 		<para>
-			The function can take two optional parameters:
+			All parameters are optional. Any of them may be ignored, provided
+			the necessary separation marks "," are properly placed.
 			<itemizedlist>
 				<listitem>
-					<emphasis>type</emphasis> (optional) - GW/destination
-					type to be checked; a negative value (ex: -1) means
-					match any group;
+					<para>
+					<emphasis role='bold'>type</emphasis> (optional) - GW/destination
+					type to be checked; when ommiting this parameter or specifying
+					a negative value i.e. "-1", matching will be done against all groups
+					</para>
 				</listitem>
 				<listitem>
-					<emphasis>flags</emphasis> (optional) - what operations
+					<para>
+					<emphasis role='bold'>flags</emphasis> (optional) - what operations
 					should be performed when a GW matches:
+					</para>
 					<itemizedlist>
 						<listitem>
-							<emphasis>'s'</emphasis> (Strip) - apply to the 
+							<para>
+							<emphasis role='bold'>'s'</emphasis> (Strip) - apply to the 
 							username of RURI the strip defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'p'</emphasis> (Prefix) - apply to the 
+							<para>
+							<emphasis role='bold'>'p'</emphasis> (Prefix) - apply to the 
 							username of RURI the prefix defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'a'</emphasis> (Attributes) - return
-							the attributes string defined by the GW into gw_attrs_avp
-							AVP
-						</listitem>
-						<listitem>
-							<emphasis>'i'</emphasis> (Gateway ID) - return the 
+							<para>
+							<emphasis role='bold'>'i'</emphasis> (Gateway ID) - return the 
 							gateway id into gw_id_avp AVP
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'n'</emphasis> (Ignore port) - ignores port
+							<para>
+							<emphasis role='bold'>'n'</emphasis> (Ignore port) - ignores port
 							number during matching
+							</para>
+						</listitem>
+						<listitem>
+							<para>
+							<emphasis role='bold'>'c'</emphasis> (Carrier ID) - return the
+							carrier id into carrier_id_avp AVP
+							</para>
 						</listitem>
 					</itemizedlist>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the matched gateway.
+					</para>
 				</listitem>
 			</itemizedlist>
 		</para>
@@ -1247,7 +1354,7 @@ if (is_from_gw("3","1") {
 
 	<section>
 		<title>
-		<function moreinfo="none">dr_is_gw(src_pv, [type, [flag]])</function>
+		<function moreinfo="none">dr_is_gw(src_avp, [type], [flag], [gw_attrs_pvar])</function>
 		</title>
 		<para>
 		The function checks if the ip address in pvar src_pv is a gateway
@@ -1261,37 +1368,60 @@ if (is_from_gw("3","1") {
 			Meaning of the parameters is as follows:
 			<itemizedlist>
 				<listitem>
-					<emphasis>src_pv</emphasis> (mandatory) - pvar containing SIP URI.
-					May be a script var or avp.
+					<para>
+					<emphasis role='bold'>src_avp</emphasis> (mandatory) - avp containing a SIP URI.
+					Does not support other OpenSIPS pseudo-variables.
+					</para>
 				</listitem>
 				<listitem>
-					<emphasis>type</emphasis> (optional) - GW/destination
-					type to be checked; a negative value (ex: -1) means
-					match any group;
+					<para>
+					<emphasis role='bold'>type</emphasis> (optional) - GW/destination
+					type to be checked; when ommiting this parameter or specifying
+					a negative value i.e. "-1", matching will be done against all groups
+					</para>
 				</listitem>
 				<listitem>
-					<emphasis>flags</emphasis> (optional) - what operations
+					<para>
+					<emphasis role='bold'>flags</emphasis> (optional) - what operations
 					should be performed when a GW matches:
+					</para>
 					<itemizedlist>
 						<listitem>
-							<emphasis>'s'</emphasis> (Strip) - apply to the 
+							<para>
+							<emphasis role='bold'>'s'</emphasis> (Strip) - apply to the 
 							username of RURI the strip defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'p'</emphasis> (Prefix) - apply to the 
+							<para>
+							<emphasis role='bold'>'p'</emphasis> (Prefix) - apply to the 
 							username of RURI the prefix defined by the GW
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'a'</emphasis> (Attributes) - return the attributes string
-							defined by the GW into gw_attrs_avp pvar
+							<para>
+							<emphasis role='bold'>'i'</emphasis> (Gateway ID) - return the gateway id into gw_id_avp pvar
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'i'</emphasis> (Gateway ID) - return the gateway id into gw_id_avp pvar
+							<para>
+							<emphasis role='bold'>'n'</emphasis> (Ignore port) - ignores port number
+							</para>
 						</listitem>
 						<listitem>
-							<emphasis>'n'</emphasis> (Ignore port) - ignores port number
+							<para>
+							<emphasis role='bold'>'c'</emphasis> (Carrier ID) - return the
+							carrier id into carrier_id_avp AVP
+							</para>
 						</listitem>
 					</itemizedlist>
+				</listitem>
+				<listitem>
+					<para>
+					<emphasis role='bold'>gw_attrs_pvar</emphasis> (output, optional)
+					- a writable pseudo-variable which will be populated with
+					the attributes of the matched gateway.
+					</para>
 				</listitem>
 			</itemizedlist>
 		</para>
@@ -1427,10 +1557,10 @@ Enabled:: yes
 <section>
 	<title>Installation</title>
 	<para>
-	The module requires 4 table in OpenSIPS database: dr_groups,
+	The module requires 4 tables in the OpenSIPS database: dr_groups,
 	dr_gateways, dr_carriers, dr_rules. The SQL syntax to create them can be
-	found in drouting-create.sql script in the database directories
-	in the opensips/scripts folder. You can also find the complete
+	found in the drouting-create.sql script, located in the database directories
+	of the opensips/scripts folder. You can also find the complete
 	database documentation on the project webpage, &osipsdbdocslink;.
 	</para>
 </section>

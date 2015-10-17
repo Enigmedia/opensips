@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -81,6 +81,12 @@ extern int tcp_keepalive;
 extern int tcp_keepcount;
 extern int tcp_keepidle;
 extern int tcp_keepinterval;
+extern int tcp_max_msg_chunks;
+extern int tcp_max_msg_time;
+extern int tcp_async;
+extern int tcp_async_local_connect_timeout;
+extern int tcp_async_local_write_timeout;
+extern int tcp_async_max_postponed_chunks;
 #endif
 #ifdef USE_TLS
 extern int tls_disable;
@@ -90,6 +96,7 @@ extern unsigned short tls_port_no;
 extern int sctp_disable;
 #endif
 extern int dont_fork;
+extern int no_daemon_mode;
 extern int check_via;
 extern int received_dns;
 /* extern int process_no; */
@@ -120,6 +127,9 @@ extern int disable_dns_blacklist;
 extern int cfg_errors;
 
 extern unsigned long shm_mem_size;
+extern unsigned int shm_hash_split_percentage;
+extern unsigned int shm_hash_split_factor;
+extern unsigned int shm_secondary_hash_size;
 extern unsigned long pkg_mem_size;
 
 extern int reply_to_via;

@@ -28,8 +28,8 @@
  */
 
 /*
- * This is an implementation of the generic AAA Interface that also provides 
- * via script functions the possibility to run custom RADIUS requests and 
+ * This is an implementation of the generic AAA Interface that also provides
+ * via script functions the possibility to run custom RADIUS requests and
  * to get information from the RADIUS reply.
  */
 
@@ -66,6 +66,7 @@ char* config_file = NULL;
 char* syslog_name = NULL;
 rc_handle *rh = NULL;
 DICT_ATTR *attr;
+static int fetch_all_values = 0;
 
 int mod_init(void);
 int init_radius_handle(void);
@@ -95,9 +96,10 @@ static cmd_export_t cmds[]= {
 
 
 static param_export_t params[] = {
-	{"sets",          STR_PARAM|USE_FUNC_PARAM, parse_sets_func},
-	{"radius_config", STR_PARAM,                &config_file},
-	{"syslog_name",   STR_PARAM,                &syslog_name},
+	{"sets",             STR_PARAM|USE_FUNC_PARAM, parse_sets_func},
+	{"radius_config",    STR_PARAM,                &config_file},
+	{"syslog_name",      STR_PARAM,                &syslog_name},
+	{"fetch_all_values", INT_PARAM,                &fetch_all_values},
 	{0, 0, 0}
 };
 
@@ -263,7 +265,7 @@ int make_send_message(struct sip_msg* msg, int index, VALUE_PAIR **send) {
 		pv_get_spec_value(msg, mp->pv, &pt);
 
 		if (pt.flags & PV_VAL_INT) {
-			//LM_DBG("%.*s---->%d---->%d---->%d\n",mp->name.len, mp->name.s, 
+			//LM_DBG("%.*s---->%d---->%d---->%d\n",mp->name.len, mp->name.s,
 			//		pt.ri, mp->value, pt.flags);
 
 			if (!rc_avpair_add(rh, send, ATTRID(mp->value), &pt.ri, -1, VENDOR(mp->value)))
@@ -271,7 +273,7 @@ int make_send_message(struct sip_msg* msg, int index, VALUE_PAIR **send) {
 		}
 		else
 		if (pt.flags & PV_VAL_STR) {
-			//LM_DBG("%.*s----->%.*s---->%d---->%d---->%d\n",mp->name.len, 
+			//LM_DBG("%.*s----->%.*s---->%d---->%d---->%d\n",mp->name.len,
 			//		mp->name.s, pt.rs.len, pt.rs.s, mp->value, pt.flags, pt.rs.len);
 			if (rc_dict_getattr(rh,mp->value)->type == PW_TYPE_IPADDR) {
 				uint32_t ipaddr=rc_get_ipaddr(pt.rs.s);
@@ -329,15 +331,16 @@ int send_auth_func(struct sip_msg* msg, str* s1, str* s2) {
 	}
 
 	res = rc_auth(rh, SIP_PORT, send, &recv, mess);
-	if (res!=OK_RC && res!=BADRESP_RC) {
+	if (res!=OK_RC && res!=REJECT_RC) {
 		LM_ERR("radius authentication message failed with %s\n",
-			(res==TIMEOUT_RC)?"TIMEOUT":"ERROR");
+			(res==TIMEOUT_RC)?"TIMEOUT":((res==BADRESP_RC)?"BAD REPLY":"ERROR"));
 	}else{
 		LM_DBG("radius authentication message sent\n");
 	}
 
 	for ( mp=sets[index2]->parsed; mp ; mp = mp->next) {
-		if ((vp = rc_avpair_get(recv, ATTRID(mp->value), VENDOR(mp->value)))) {
+		vp = recv;
+		while ( (vp=rc_avpair_get(vp, ATTRID(mp->value), VENDOR(mp->value)))!=NULL ) {
 			memset(&pvt, 0, sizeof(pv_value_t));
 			if (vp->type == PW_TYPE_INTEGER) {
 				pvt.flags = PV_VAL_INT|PV_TYPE_INT;
@@ -352,8 +355,7 @@ int send_auth_func(struct sip_msg* msg, str* s1, str* s2) {
 			if (pv_set_value(msg, mp->pv, (int)EQ_T, &pvt) < 0) {
 				LM_ERR("setting avp failed....skipping\n");
 			}
-		} else {
-			LM_DBG("attribute was not found in received radius message\n");
+			vp = fetch_all_values ? vp->next : NULL;
 		}
 	}
 
@@ -362,9 +364,9 @@ int send_auth_func(struct sip_msg* msg, str* s1, str* s2) {
 		for(; (vp = rc_avpair_get(vp, attr->value, 0)); vp = vp->next)
 			extract_avp(vp);
 
-	if ( res!=OK_RC && res!=BADRESP_RC)
+	if ( res!=OK_RC && res!=REJECT_RC)
 		goto error;
-	
+
 
 	if (send) rc_avpair_free(send);
 	if (recv) rc_avpair_free(recv);

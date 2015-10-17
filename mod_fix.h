@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -34,6 +34,10 @@
 #define GPARAM_TYPE_STR		1
 #define GPARAM_TYPE_PVS		2
 #define GPARAM_TYPE_PVE		3
+
+#define GPARAM_INT_VALUE_FLAG	(1U<<0)
+#define GPARAM_STR_VALUE_FLAG	(1U<<1)
+
 
 /*!
  * generic parameter that holds a string, an int or a pseudo-variable
@@ -58,9 +62,9 @@ int fixup_free_str_str(void** param, int param_no);
 int fixup_uint_null(void** param, int param_no);
 int fixup_uint_uint(void** param, int param_no);
 
-#if 0
 int fixup_sint_null(void** param, int param_no);
 int fixup_sint_sint(void** param, int param_no);
+#if 0
 int fixup_sint_uint(void** param, int param_no);
 int fixup_uint_sint(void** param, int param_no);
 #endif
@@ -97,11 +101,14 @@ int fixup_spve_null(void** param, int param_no);
 int fixup_spve_uint(void** param, int param_no);
 int fixup_get_svalue(struct sip_msg* msg, gparam_p gp, str *val);
 
+int fixup_get_isvalue(struct sip_msg* msg, gparam_p gp,
+			int *i_val, str *s_val, unsigned int *flags);
 
 int fixup_spve(void** param);
 int fixup_pvar(void **param);
 int fixup_str(void **param);
 int fixup_uint(void** param);
+int fixup_sint(void** param);
 int fixup_igp(void** param);
 
 int fixup_sgp(void** param);

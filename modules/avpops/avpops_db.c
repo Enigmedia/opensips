@@ -47,6 +47,8 @@ static db_val_t   vals_cmp[3]; /* statement as in "select" and "delete" */
 /* linked list with all defined DB schemes */
 static struct db_scheme  *db_scheme_list=0;
 
+struct db_url *default_db_url = NULL;
+
 /* array of db urls */
 static struct db_url *db_urls = NULL;  /* array of database urls */
 static unsigned int no_db_urls = 0;
@@ -113,10 +115,11 @@ int add_db_url(modparam_t type, void *val)
 		return E_OUT_OF_MEM;
 	}
 
+	memset(&db_urls[no_db_urls], '\0', sizeof *db_urls);
+
 	db_urls[no_db_urls].url.s = url;
 	db_urls[no_db_urls].url.len = strlen(url);
 	db_urls[no_db_urls].idx = idx;
-	db_urls[no_db_urls].hdl = NULL;
 
 	no_db_urls++;
 
@@ -141,6 +144,23 @@ int avpops_db_bind(void)
 			LM_CRIT("database modules (%.*s) does not "
 				"provide all functions needed by avpops module\n",
 				db_urls[i].url.len,db_urls[i].url.s);
+			return -1;
+		}
+
+		if ((db_urls[i].flags & DBFL_CAP_RAW_QUERY) &&
+			 !DB_CAPABILITY(db_urls[i].dbf, DB_CAP_RAW_QUERY)) {
+			LM_ERR("DB driver for '%.*s' does not support raw queries!\n",
+					db_urls[i].url.len,db_urls[i].url.s);
+			return -1;
+		}
+	}
+
+	/* we cannot catch the default DB url usage & flag it; do a low-level check :( */
+	if (is_script_func_used("avp_db_query", 1) ||
+		is_script_func_used("avp_db_query", 2)) {
+		if (!DB_CAPABILITY(default_db_url->dbf, DB_CAP_RAW_QUERY)) {
+			LM_ERR("DB driver for '%.*s' does not support raw queries!\n",
+					default_db_url->url.len, default_db_url->url.s);
 			return -1;
 		}
 	}
@@ -419,12 +439,12 @@ int db_query_avp(struct db_url *url, struct sip_msg *msg, char *query,
 
 	query_str.s = query;
 	query_str.len = strlen(query);
-	
+
 	if(url->dbf.raw_query( url->hdl, &query_str, &db_res)!=0)
 	{
 		const str *t = url->hdl&&url->hdl->table&&url->hdl->table->s
 			? url->hdl->table : 0;
-		LM_ERR("raw_query failed: db%d(%.*s) %.40s...\n", 
+		LM_ERR("raw_query failed: db%d(%.*s) %.40s...\n",
 		  url->idx, t?t->len:0, t?t->s:"", query);
 		return -1;
 	}
@@ -438,11 +458,11 @@ int db_query_avp(struct db_url *url, struct sip_msg *msg, char *query,
 
 	LM_DBG("rows [%d]\n", RES_ROW_N(db_res));
 	/* reverse order of rows so that first row get's in front of avp list */
-	for(i = RES_ROW_N(db_res)-1; i >= 0; i--) 
+	for(i = RES_ROW_N(db_res)-1; i >= 0; i--)
 	{
 		LM_DBG("row [%d]\n", i);
 		crt = dest;
-		for(j = 0; j < RES_COL_N(db_res); j++) 
+		for(j = 0; j < RES_COL_N(db_res); j++)
 		{
 			if(RES_ROWS(db_res)[i].values[j].nul)
 				goto next_avp;

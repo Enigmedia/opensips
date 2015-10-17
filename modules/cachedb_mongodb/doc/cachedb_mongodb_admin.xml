@@ -124,6 +124,7 @@
 			
 			<para>
 				The mongo C driver can be downloaded from https://github.com/mongodb/mongo-c-driver
+				Note : Please use the 0.6 version of the driver
 			</para>
 			
 			</listitem>
@@ -221,6 +222,25 @@ modparam("cachedb_mongodb","write_concern","{ \"getLastError\": 1, "j" : "true" 
 	</programlisting>
 		</example>
 		
+	</section>
+		<section>
+		<title><varname>exec_threshold</varname> (int)</title>
+		<para>
+			The maximum number of microseconds that a mongodb query can last.
+			Anything above the threshold will trigger a warning message to the log
+		</para>
+		<para>
+		<emphasis>Default value is <quote>0 ( unlimited - no warnings )</quote>.
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>exec_threshold</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("cachedb_mongodb", "exec_threshold", 100000)
+...
+	</programlisting>
+		</example>
 	</section>
 
 </section>

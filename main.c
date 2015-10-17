@@ -1,6 +1,4 @@
 /*
- * $Id$
- *
  * Copyright (C) 2001-2003 FhG Fokus
  * Copyright (C) 2005-2006 Voice Sistem S.R.L
  *
@@ -16,8 +14,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -28,10 +26,10 @@
  *  2003-03-29  pkg cleaners for fifo and script callbacks introduced (jiri)
  *  2003-03-31  removed snmp part (obsolete & no place in core) (andrei)
  *  2003-04-06  child_init called in all processes (janakj)
- *  2003-04-08  init_mallocs split into init_{pkg,shm}_mallocs and 
+ *  2003-04-08  init_mallocs split into init_{pkg,shm}_mallocs and
  *               init_shm_mallocs called after cmd. line parsing (andrei)
  *  2003-04-15  added tcp_disable support (andrei)
- *  2003-05-09  closelog() before openlog to force opening a new fd 
+ *  2003-05-09  closelog() before openlog to force opening a new fd
  *              (needed on solaris) (andrei)
  *  2003-06-11  moved all signal handlers init. in install_sigs and moved it
  *              after daemonize (so that we won't catch anymore our own
@@ -106,6 +104,7 @@
 #include "daemonize.h"
 #include "route.h"
 #include "udp_server.h"
+#include "bin_interface.h"
 #include "globals.h"
 #include "mem/mem.h"
 #ifdef SHM_MEM
@@ -133,6 +132,7 @@
 #ifdef USE_TCP
 #include "poll_types.h"
 #include "tcp_init.h"
+#include "tcp_conn.h"
 #ifdef USE_TLS
 #include "tls/tls_init.h"
 #endif
@@ -146,7 +146,6 @@
 #include "mi/mi_core.h"
 #include "db/db_insertq.h"
 
-static char id[]="@(#) $Id$";
 static char* version=OPENSIPS_FULL_VERSION;
 static char* flags=OPENSIPS_COMPILE_FLAGS;
 char compiled[]= __TIME__ " " __DATE__ ;
@@ -166,13 +165,9 @@ void print_ct_constants(void)
 #ifdef USE_TCP
 	printf("poll method support: %s.\n", poll_support);
 #endif
-	printf("svnrevision: %s\n",
-#ifdef SVNREVISION
-	SVNREVISION
-#else
-	"unknown"
+#ifdef VERSIONTYPE
+	printf("%s revision: %s\n", VERSIONTYPE, THISREVISION);
 #endif
-	);
 }
 
 /* global vars */
@@ -182,13 +177,36 @@ int own_pgid = 0; /* whether or not we have our own pgid (and it's ok
 char* cfg_file = 0;
 unsigned int maxbuffer = MAX_RECV_BUFFER_SIZE; /* maximum buffer size we do
 												  not want to exceed during the
-												  auto-probing procedure; may 
+												  auto-probing procedure; may
 												  be re-configured */
 int children_no = 0;			/* number of children processing requests */
 #ifdef USE_TCP
 int tcp_children_no = 0;
 int tcp_disable = 0; /* 1 if tcp is disabled */
 int tcp_crlf_pingpong = 1; /* 0: send CRLF pong to incoming CRLFCRLF ping */
+int tcp_max_msg_chunks = TCP_CHILD_MAX_MSG_CHUNK; /* Max number of chunks that
+													 we except to receive a SIP
+													 message - anything above will
+													 lead to the connection
+													 being treat as broken & closed */
+int tcp_max_msg_time = TCP_CHILD_MAX_MSG_TIME;	/* Max number of seconds that
+												   we except a full SIP message
+												   to arrive in - anything above
+												   will lead to the connection to
+												   closed */
+int tcp_async = 0;	/* 1 if TCP connect & write should be async */
+int tcp_async_local_connect_timeout = 100; /* Number of miliseconds that a
+									worker will block waiting for a local
+									connect - if connect op exceeds this, it
+									will get passed to TCP main*/
+int tcp_async_local_write_timeout = 10; /* Number of miliseconds that a
+									worker will block waiting for a local
+									write - if write op exceeds this, it
+									will get passed to TCP main*/
+int tcp_async_max_postponed_chunks = 32; /* maximum number of write chunks that
+											will be queued per TCP connection -
+											if we exceed this number, we just
+											drop the connection */
 #endif
 #ifdef USE_TLS
 int tls_disable = 1; /* 1 if tls is disabled */
@@ -204,6 +222,7 @@ int *debug = &debug_init;
 int debug = L_NOTICE;
 #endif
 int dont_fork = 0;
+int no_daemon_mode = 0;
 /* start by logging to stderr */
 int log_stderr = 1;
 /* log facility (see syslog(3)) */
@@ -240,7 +259,7 @@ str user_agent_header = {USER_AGENT,sizeof(USER_AGENT)-1};
  * host? by default not -- too expensive
  */
 int mhomed=0;
-/* use dns and/or rdns or to see if we need to add 
+/* use dns and/or rdns or to see if we need to add
    a ;received=x.x.x.x to via: */
 int received_dns = 0;
 char* working_dir = 0;
@@ -277,8 +296,8 @@ struct socket_info* bind_address=0; /* pointer to the crt. proc.
 struct socket_info* sendipv4; /* ipv4 socket to use when msg. comes from ipv6*/
 struct socket_info* sendipv6; /* same as above for ipv6 */
 #ifdef USE_TCP
-struct socket_info* sendipv4_tcp; 
-struct socket_info* sendipv6_tcp; 
+struct socket_info* sendipv4_tcp;
+struct socket_info* sendipv6_tcp;
 #endif
 #ifdef USE_TLS
 struct socket_info* sendipv4_tls;
@@ -290,11 +309,11 @@ struct socket_info* sendipv6_sctp;
 #endif
 
 
-/* if aliases should be automatically discovered and added 
+/* if aliases should be automatically discovered and added
  * during fixing listening sockets */
 int auto_aliases=1;
 
-/* if the stateless forwarding support in core should be 
+/* if the stateless forwarding support in core should be
  * disabled or not */
 int sl_fwd_disabled=-1;
 
@@ -314,9 +333,12 @@ time_t startup_time = 0;
 
 /* shared memory (in MB) */
 unsigned long shm_mem_size=SHM_MEM_SIZE * 1024 * 1024;
+unsigned int shm_hash_split_percentage = DEFAULT_SHM_HASH_SPLIT_PERCENTAGE;
+unsigned int shm_secondary_hash_size = DEFAULT_SHM_SECONDARY_HASH_SIZE;
 
-/* shared memory (in MB) */
+/* packaged memory (in MB) */
 unsigned long pkg_mem_size=PKG_MEM_SIZE * 1024 * 1024;
+
 
 /* export command-line to anywhere else */
 int my_argc;
@@ -334,16 +356,28 @@ char* pgid_file = 0;
 
 /**
  * Clean up on exit. This should be called before exiting.
- * \param show_status set to one to display the mem status 
+ * \param show_status set to one to display the mem status
  */
 void cleanup(int show_status)
 {
 	LM_INFO("cleanup\n");
 	/*clean-up*/
-	if (mem_lock) 
-		shm_unlock(); /* hack: force-unlock the shared memory lock in case
-					 some process crashed and let it locked; this will 
-					 allow an almost gracious shutdown */
+
+	/* hack: force-unlock the shared memory lock in case
+	   		 some process crashed and let it locked; this will
+	   		 allow an almost gracious shutdown */
+	if (mem_lock)
+#ifdef HP_MALLOC
+	{
+		int i;
+
+		for (i = 0; i < HP_HASH_SIZE; i++)
+			shm_unlock(i);
+	}
+#else
+		shm_unlock();
+#endif
+
 	handle_ql_shutdown();
 	destroy_modules();
 #ifdef USE_TCP
@@ -387,14 +421,14 @@ void cleanup(int show_status)
 }
 
 
-/** 
+/**
  * Tries to send a signal to all our processes
  * If daemonized  is ok to send the signal to all the process group,
  * however if not daemonized we might end up sending the signal also
- * to the shell which launched us => most signals will kill it if 
- * it's not in interactive mode and we don't want this. The non-daemonized 
- * case can occur when an error is encountered before daemonize is called 
- * (e.g. when parsing the config file) or when opensips is started in 
+ * to the shell which launched us => most signals will kill it if
+ * it's not in interactive mode and we don't want this. The non-daemonized
+ * case can occur when an error is encountered before daemonize is called
+ * (e.g. when parsing the config file) or when opensips is started in
  * "dont-fork" mode.
  * \param signum signal for killing the children
  */
@@ -410,7 +444,7 @@ static void kill_all_children(int signum)
 
 
 /**
- * Timeout handler during wait for children exit. 
+ * Timeout handler during wait for children exit.
  * If this handler is called, a critical timeout has occured while
  * waiting for the children to finish => we should kill everything and exit
  * \param signo signal for killing the children
@@ -426,7 +460,7 @@ static void sig_alarm_kill(int signo)
 
 
 /**
- * Timeout handler during wait for children exit. 
+ * Timeout handler during wait for children exit.
  * like sig_alarm_kill, but the timeout has occured when cleaning up,
  * try to leave a core for future diagnostics
  * \param signo signal for killing the children
@@ -466,7 +500,7 @@ void handle_sigs(void)
 				LM_DBG("INT received, program terminates\n");
 			else
 				LM_DBG("SIGTERM received, program terminates\n");
-				
+
 			/* first of all, kill the children also */
 			kill_all_children(SIGTERM);
 			if (signal(SIGALRM, sig_alarm_kill) == SIG_ERR ) {
@@ -484,7 +518,7 @@ void handle_sigs(void)
 			dprint("Thank you for flying " NAME "\n");
 			exit(0);
 			break;
-			
+
 		case SIGUSR1:
 #ifdef PKG_MALLOC
 			LM_GEN1(memdump, "Memory status (pkg):\n");
@@ -495,13 +529,13 @@ void handle_sigs(void)
 			shm_status();
 #endif
 			break;
-			
+
 		case SIGUSR2:
 #ifdef PKG_MALLOC
 			set_pkg_stats( get_pkg_status_holder(process_no) );
 #endif
 			break;
-			
+
 		case SIGCHLD:
 			do_exit = 0;
 			while ((chld=waitpid( -1, &chld_status, WNOHANG ))>0) {
@@ -517,9 +551,9 @@ void handle_sigs(void)
 				overall_status |= chld_status;
 				LM_DBG("status = %d\n",overall_status);
 
-				if (WIFEXITED(chld_status)) 
+				if (WIFEXITED(chld_status))
 					LM_INFO("child process %d exited normally,"
-							" status=%d\n", chld, 
+							" status=%d\n", chld,
 							WEXITSTATUS(chld_status));
 				else if (WIFSIGNALED(chld_status)) {
 					LM_INFO("child process %d exited by a signal"
@@ -528,7 +562,7 @@ void handle_sigs(void)
 					LM_INFO("core was %sgenerated\n",
 							 WCOREDUMP(chld_status) ?  "" : "not " );
 #endif
-				}else if (WIFSTOPPED(chld_status)) 
+				}else if (WIFSTOPPED(chld_status))
 					LM_INFO("child process %d stopped by a"
 								" signal %d\n", chld,
 								 WSTOPSIG(chld_status));
@@ -552,7 +586,7 @@ void handle_sigs(void)
 			LM_DBG("terminating due to SIGCHLD\n");
 			exit(overall_status ? -1 : 0);
 			break;
-		
+
 		case SIGHUP: /* ignoring it*/
 			LM_DBG("SIGHUP received, ignoring it\n");
 			break;
@@ -576,7 +610,7 @@ static void sig_usr(int signo)
 		if (sig_flag==0) sig_flag=signo;
 		else /*  previous sig. not processed yet, ignoring? */
 			return; ;
-		if (dont_fork) 
+		if (dont_fork)
 				/* only one proc, doing everything from the sig handler,
 				unsafe, but this is only for debugging mode*/
 			handle_sigs();
@@ -622,7 +656,7 @@ static void sig_usr(int signo)
 
 /**
  * Install the signal handlers.
- * \return 0 on success, -1 on error 
+ * \return 0 on success, -1 on error
  */
 int install_sigs(void)
 {
@@ -636,7 +670,7 @@ int install_sigs(void)
 		LM_ERR("no SIGINT signal handler can be installed\n");
 		goto error;
 	}
-	
+
 	if (signal(SIGUSR1, sig_usr)  == SIG_ERR ) {
 		LM_ERR("no SIGUSR1 signal handler can be installed\n");
 		goto error;
@@ -716,7 +750,7 @@ static int main_loop(void)
 		}
 
 		/* main process, receive loop */
-		set_proc_attrs("stand-alone SIP receiver %.*s", 
+		set_proc_attrs("stand-alone SIP receiver %.*s",
 			 bind_address->sock_str.len, bind_address->sock_str.s );
 
 		/* We will call child_init even if we
@@ -829,6 +863,17 @@ static int main_loop(void)
 			*startup_done = 0;
 		}
 
+		if (fix_socket_list(&bin) != 0) {
+			LM_ERR("failed to initialize binary interface socket list!\n");
+			goto error;
+		}
+
+		/* OpenSIPS <--> OpenSIPS communication interface */
+		if (bin && start_bin_receivers() != 0) {
+			LM_CRIT("cannot start binary interface receiver processes!\n");
+			goto error;
+		}
+
 		/* udp processes */
 		for(si=udp_listen; si; si=si->next){
 
@@ -873,7 +918,7 @@ static int main_loop(void)
 							*startup_done = 1;
 						}
 
-						if (send_status_code(0) < 0)
+						if (!no_daemon_mode && send_status_code(0) < 0)
 							LM_ERR("failed to send status code\n");
 						clean_write_pipeend();
 
@@ -887,7 +932,7 @@ static int main_loop(void)
 					else {
 						/* wait for first proc to finish the startup route */
 						if(chd_rank == 1 && startup_done!=NULL)
-							while( !(*startup_done) ) usleep(5);
+							while( !(*startup_done) ) {usleep(5);handle_sigs();}
 					}
 				}
 			}
@@ -920,7 +965,7 @@ static int main_loop(void)
 						exit(-1);
 					}
 
-					/* was startup route executed so far ? if not, run it only by the 
+					/* was startup route executed so far ? if not, run it only by the
 					 * first SCTP proc (first proc from first interface) */
 					if( (si==sctp_listen && i==0) && startup_done!=NULL && *startup_done==0) {
 						LM_DBG("runing startup for first SCTP\n");
@@ -935,7 +980,7 @@ static int main_loop(void)
 						*startup_done = 1;
 					}
 
-					if (send_status_code(0) < 0)
+					if (!no_daemon_mode && send_status_code(0) < 0)
 						LM_ERR("failed to send status code\n");
 					clean_write_pipeend();
 
@@ -944,7 +989,7 @@ static int main_loop(void)
 				} else {
 					/* wait for first proc to finish the startup route */
 					if( (si==sctp_listen && i==0) && startup_done!=NULL)
-						while( !(*startup_done) ) usleep(5);
+						while( !(*startup_done) ) {usleep(5);handle_sigs();}
 				}
 			}
 		}
@@ -966,7 +1011,7 @@ static int main_loop(void)
 		if (tcp_init_children(&chd_rank, startup_done)<0) goto error;
 		/* wait for the startup route to be executed */
 		if( startup_done!=NULL)
-			while( !(*startup_done) ) usleep(5);
+			while( !(*startup_done) ) {usleep(5);handle_sigs();}
 		/* start tcp+tls master proc */
 		if ( (pid=internal_fork( "TCP main"))<0 ) {
 			LM_CRIT("cannot fork tcp main process\n");
@@ -988,7 +1033,7 @@ static int main_loop(void)
 				exit(-1);
 			}
 
-			if (send_status_code(0) < 0)
+			if (!no_daemon_mode && send_status_code(0) < 0)
 				LM_ERR("failed to send status code\n");
 			clean_write_pipeend();
 
@@ -1016,7 +1061,7 @@ static int main_loop(void)
 		goto error;
 	}
 
-	if (send_status_code(0) < 0)
+	if (!no_daemon_mode && send_status_code(0) < 0)
 		LM_ERR("failed to send status code\n");
 	clean_write_pipeend();
 
@@ -1068,7 +1113,7 @@ int main(int argc, char** argv)
 
 	/* process pkg mem size from command line */
 	opterr=0;
-	options="f:cCm:M:b:l:n:N:rRvdDETSVhw:t:u:g:P:G:W:o:";
+	options="f:cCm:M:b:l:n:N:rRvdDFETSVhw:t:u:g:P:G:W:o:";
 
 	while((c=getopt(argc,argv,options))!=-1){
 		switch(c){
@@ -1160,6 +1205,9 @@ int main(int argc, char** argv)
 			case 'D':
 					dont_fork=1;
 					break;
+			case 'F':
+					no_daemon_mode=1;
+					break;
 			case 'E':
 					cfg_log_stderr=1;
 					break;
@@ -1204,10 +1252,9 @@ int main(int argc, char** argv)
 					printf("version: %s\n", version);
 					printf("flags: %s\n", flags );
 					print_ct_constants();
-					printf("%s\n",id);
 					printf("%s compiled on %s with %s\n", __FILE__,
 							compiled, COMPILER );
-					
+
 					exit(0);
 					break;
 			case 'h':
@@ -1327,6 +1374,11 @@ try_again:
 	print_rl();
 #endif
 
+	if (no_daemon_mode+dont_fork > 1) {
+		LM_ERR("cannot use -D (fork=no) and -F together\n");
+		return ret;
+	}
+
 	/* init the resolver, before fixing the config */
 	resolv_init();
 
@@ -1335,15 +1387,15 @@ try_again:
 #ifdef USE_TLS
 	if (tls_port_no<=0) tls_port_no=SIPS_PORT;
 #endif
-	
-	
+
+
 	if (children_no<=0) children_no=CHILD_NO;
 #ifdef USE_TCP
 	if (!tcp_disable){
 		if (tcp_children_no<=0) tcp_children_no=children_no;
 	}
 #endif
-	
+
 	if (working_dir==0) working_dir="/";
 
 	/* get uid/gid */
@@ -1370,9 +1422,9 @@ try_again:
 	/*print_aliases();*/
 	print_aliases();
 	printf("\n");
-	
+
 	if (dont_fork){
-		LM_WARN("no fork mode %s\n", 
+		LM_WARN("no fork mode %s\n",
 				(udp_listen)?(
 				(udp_listen->next)?" and more than one listen address found"
 				"(will use only the first one)":""
@@ -1383,11 +1435,10 @@ try_again:
 		return 0;
 	}
 
-
 	time(&startup_time);
 
 	/*init shm mallocs
-	 *  this must be here 
+	 *  this must be here
 	 *     -to allow setting shm mem size from the command line
 	 *       => if shm_mem should be settable from the cfg file move
 	 *       everything after
@@ -1397,12 +1448,21 @@ try_again:
 	 * --andrei */
 	if (init_shm_mallocs()==-1)
 		goto error;
+
+	/* Init statistics */
+	if (init_stats_collector()<0) {
+		LM_ERR("failed to initialize statistics\n");
+		goto error;
+	}
+
+	init_shm_statistics();
+
 	/*init timer, before parsing the cfg!*/
 	if (init_timer()<0){
 		LM_CRIT("could not initialize timer, exiting...\n");
 		goto error;
 	}
-	
+
 #ifdef USE_TCP
 	if (!tcp_disable){
 		/*init tcp*/
@@ -1451,7 +1511,7 @@ try_again:
 	if (disable_core_dump) set_core_dump(0, 0);
 	else set_core_dump(1, shm_mem_size+pkg_mem_size+4*1024*1024);
 	if (open_files_limit>0){
-		if(increase_open_fds(open_files_limit)<0){ 
+		if(increase_open_fds(open_files_limit)<0){
 			LM_ERR("ERROR: error could not increase file limits\n");
 			goto error;
 		}
@@ -1459,7 +1519,7 @@ try_again:
 
 	/* print OpenSIPS version to log for history tracking */
 	LM_NOTICE("version: %s\n", version);
-	
+
 	/* print some data about the configuration */
 #ifdef SHM_MEM
 	LM_INFO("using %ld Mb shared memory\n", ((shm_mem_size/1024)/1024));
@@ -1469,11 +1529,6 @@ try_again:
 	/* init serial forking engine */
 	if (init_serialization()!=0) {
 		LM_ERR("failed to initialize serialization\n");
-		goto error;
-	}
-	/* Init statistics */
-	if (init_stats_collector()<0) {
-		LM_ERR("failed to initialize statistics\n");
 		goto error;
 	}
 	/* Init MI */
@@ -1490,7 +1545,7 @@ try_again:
 
 	/* init black list engine */
 	if (init_black_lists()!=0) {
-		LM_CRIT("failed to init black lists\n");
+		LM_CRIT("failed to init blacklists\n");
 		goto error;
 	}
 	/* init resolver's blacklist */
@@ -1519,7 +1574,7 @@ try_again:
 
 	/* init query list now in shm
 	 * so all processes that will be forked from now on
-	 * will have access to it 
+	 * will have access to it
 	 *
 	 * if it fails, give it a try and carry on */
 	if (init_ql_support() != 0) {

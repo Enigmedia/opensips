@@ -1,6 +1,6 @@
 /*
  * $Id$
- * 
+ *
  * Copyright (C) 2001-2003 FhG Fokus
  *
  * This file is part of opensips, a free SIP server.
@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -36,7 +36,7 @@
  * of messages in memory); note that many operations, which
  * allocate pkg memory (such as parsing) cannot be used with
  * a cloned message -- it would result in linking pkg structures
- * to shmem msg and eventually in a memory error 
+ * to shmem msg and eventually in a memory error
  *
  * the cloned message is stored in a single memory fragment to
  * save too many shm_mallocs -- these are expensive as they
@@ -55,7 +55,7 @@
 #include "../../parser/digest/digest.h"
 
 
-/* rounds to the first 4 byte multiple on 32 bit archs 
+/* rounds to the first 4 byte multiple on 32 bit archs
  * and to the first 8 byte multiple on 64 bit archs */
 #define ROUND4(s) \
 	(((s)+(sizeof(char*)-1))&(~(sizeof(char*)-1)))
@@ -130,7 +130,7 @@ inline static struct via_body* via_body_cloner( char* new_buf,
 				new_vp->name.s=translate_pointer(new_buf,org_buf,vp->name.s);
 				new_vp->value.s=translate_pointer(new_buf,org_buf,vp->value.s);
 				new_vp->start=translate_pointer(new_buf,org_buf,vp->start);
-				
+
 				/* "translate" the shortcuts */
 				switch(new_vp->type){
 					case PARAM_BRANCH:
@@ -219,7 +219,7 @@ static inline struct auth_body* auth_body_cloner(char* new_buf, char *org_buf, s
 	new_auth = (struct auth_body*)(*p);
 	memcpy(new_auth , auth , sizeof(struct auth_body));
 	(*p) += ROUND4(sizeof(struct auth_body));
-	
+
 	/* authorized field must be cloned elsewhere */
 	new_auth->digest.username.whole.s =
 		translate_pointer(new_buf, org_buf, auth->digest.username.whole.s);
@@ -257,7 +257,7 @@ static inline int clone_authorized_hooks(struct sip_msg* new,
 
 	get_authorized_cred(old->authorization, &hook1);
 	if (!hook1) stop = 1;
-	
+
 	get_authorized_cred(old->proxy_auth, &hook2);
 	if (!hook2) stop |= 2;
 
@@ -274,7 +274,7 @@ static inline int clone_authorized_hooks(struct sip_msg* new,
 				new_ptr;
 			stop |= 1;
 		}
-		
+
 		if (ptr == hook2) {
 			if (!new->proxy_auth || !new->proxy_auth->parsed) {
 				LM_CRIT("message cloner (proxy_auth) failed\n");
@@ -323,9 +323,21 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len )
 	len = ROUND4(sizeof( struct sip_msg ));
 	/*we will keep only the original msg +ZT */
 	len += ROUND4(org_msg->len + 1);
+
 	/*the new uri (if any)*/
 	if (org_msg->new_uri.s && org_msg->new_uri.len)
-		len+= ROUND4(org_msg->new_uri.len);
+		len += ROUND4(org_msg->new_uri.len);
+
+	if (org_msg->set_global_address.s) {
+		LM_DBG("XXX - have address\n");
+		len += ROUND4(org_msg->set_global_address.len);
+	}
+
+	if (org_msg->set_global_port.s) {
+		LM_DBG("XXX - have port\n");
+		len += ROUND4(org_msg->set_global_port.len);
+	}
+
 	/*all the headers*/
 	for( hdr=org_msg->headers ; hdr ; hdr=hdr->next )
 	{
@@ -437,7 +449,7 @@ do { \
 
 	LUMP_LIST_LEN(len, org_msg->add_rm);
 	LUMP_LIST_LEN(len, org_msg->body_lumps);
-	
+
 	/*length of reply lump structures*/
 	for(rpl_lump=org_msg->reply_lump;rpl_lump;rpl_lump=rpl_lump->next)
 			len+=ROUND4(sizeof(struct lump_rpl))+ROUND4(rpl_lump->text.len);
@@ -465,6 +477,7 @@ do { \
 	p += ROUND4(sizeof(struct sip_msg));
 	new_msg->add_rm = 0;
 	new_msg->body_lumps = 0;
+
 	/* new_uri */
 	if (org_msg->new_uri.s && org_msg->new_uri.len)
 	{
@@ -472,6 +485,21 @@ do { \
 		memcpy( p , org_msg->new_uri.s , org_msg->new_uri.len);
 		p += ROUND4(org_msg->new_uri.len);
 	}
+
+	/* advertised address and port */
+	if (org_msg->set_global_address.s)
+	{
+		new_msg->set_global_address.s = p;
+		memcpy(p, org_msg->set_global_address.s, org_msg->set_global_address.len);
+		p += ROUND4(org_msg->set_global_address.len);
+	}
+	if (org_msg->set_global_port.s)
+	{
+		new_msg->set_global_port.s = p;
+		memcpy(p, org_msg->set_global_port.s, org_msg->set_global_port.len);
+		p += ROUND4(org_msg->set_global_port.len);
+	}
+
 	/* dst_uri to zero */
 	new_msg->dst_uri.s = 0;
 	new_msg->dst_uri.len = 0;
@@ -575,7 +603,7 @@ do { \
 				else
 				{
 					LINK_SIBLING_HEADER(h_via1, new_hdr);
-					new_hdr->parsed =  
+					new_hdr->parsed =
 						via_body_cloner( new_msg->buf , org_msg->buf ,
 						(struct via_body*)hdr->parsed , &p);
 				}
@@ -762,7 +790,7 @@ do { \
 					LINK_SIBLING_HEADER(content_type, new_hdr);
 				}
 				break;
-				
+
 			case HDR_ACCEPT_T:
 				if (HOOK_NOT_SET(accept)) {
 					new_msg->accept = new_hdr;

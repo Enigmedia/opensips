@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -56,6 +56,7 @@
 #include "udomain.h"         /* {insert,delete,get,release}_urecord */
 #include "urecord.h"         /* {insert,delete,get}_ucontact */
 #include "ucontact.h"        /* update_ucontact */
+#include "ureplication.h"
 #include "ul_mi.h"
 #include "ul_callback.h"
 #include "usrloc.h"
@@ -76,6 +77,7 @@
 #define PATH_COL       "path"
 #define SOCK_COL       "socket"
 #define METHODS_COL    "methods"
+#define ATTR_COL       "attr"
 #define LAST_MOD_COL   "last_modified"
 #define SIP_INSTANCE_COL   "sip_instance"
 
@@ -85,9 +87,13 @@ static void timer(unsigned int ticks, void* param); /*!< Timer handler */
 static int child_init(int rank);                    /*!< Per-child init function */
 static int mi_child_init(void);
 
+static int add_replication_dest(modparam_t type, void *val);
+
 extern int bind_usrloc(usrloc_api_t* api);
 extern int ul_locks_no;
 extern rw_lock_t *sync_lock;
+extern int skip_replicated_db_ops;
+
 /*
  * Module parameters and their default values
  */
@@ -106,7 +112,8 @@ str received_col    = str_init(RECEIVED_COL);		/*!< Name of column containing tr
 str path_col        = str_init(PATH_COL);		/*!< Name of column containing the Path header */
 str sock_col        = str_init(SOCK_COL);		/*!< Name of column containing the received socket */
 str methods_col     = str_init(METHODS_COL);		/*!< Name of column containing the supported methods */
-str last_mod_col     = str_init(LAST_MOD_COL);		/*!< Name of column containing the last modified date */
+str last_mod_col    = str_init(LAST_MOD_COL);		/*!< Name of column containing the last modified date */
+str attr_col        = str_init(ATTR_COL);		/*!< Name of column containing additional info */
 str sip_instance_col = str_init(SIP_INSTANCE_COL);
 str db_url          = {NULL, 0};					/*!< Database URL */
 int timer_interval  = 60;				/*!< Timer interval in seconds */
@@ -121,9 +128,12 @@ unsigned int nat_bflag = (unsigned int)-1;
 static char *nat_bflag_str = 0;
 unsigned int init_flag = 0;
 
+/* usrloc data replication using the bin interface */
+int accept_replicated_udata;
+struct replication_dest *replication_dests;
+
 db_con_t* ul_dbh = 0; /* Database connection handle */
 db_func_t ul_dbf;
-
 
 
 /*! \brief
@@ -136,33 +146,40 @@ static cmd_export_t cmds[] = {
 
 
 /*! \brief
- * Exported parameters 
+ * Exported parameters
  */
 static param_export_t params[] = {
-	{"user_column",       STR_PARAM, &user_col.s      },
-	{"domain_column",     STR_PARAM, &domain_col.s    },
-	{"contact_column",    STR_PARAM, &contact_col.s   },
-	{"expires_column",    STR_PARAM, &expires_col.s   },
-	{"q_column",          STR_PARAM, &q_col.s         },
-	{"callid_column",     STR_PARAM, &callid_col.s    },
-	{"cseq_column",       STR_PARAM, &cseq_col.s      },
-	{"flags_column",      STR_PARAM, &flags_col.s     },
-	{"cflags_column",     STR_PARAM, &cflags_col.s    },
-	{"db_url",            STR_PARAM, &db_url.s        },
-	{"timer_interval",    INT_PARAM, &timer_interval  },
-	{"db_mode",           INT_PARAM, &db_mode         },
-	{"use_domain",        INT_PARAM, &use_domain      },
-	{"desc_time_order",   INT_PARAM, &desc_time_order },
-	{"user_agent_column", STR_PARAM, &user_agent_col.s},
-	{"received_column",   STR_PARAM, &received_col.s  },
-	{"path_column",       STR_PARAM, &path_col.s      },
-	{"socket_column",     STR_PARAM, &sock_col.s      },
-	{"methods_column",    STR_PARAM, &methods_col.s   },
-	{"matching_mode",     INT_PARAM, &matching_mode   },
-	{"cseq_delay",        INT_PARAM, &cseq_delay      },
-	{"hash_size",         INT_PARAM, &ul_hash_size    },
-	{"nat_bflag",         STR_PARAM, &nat_bflag_str   },
-	{"nat_bflag",         INT_PARAM, &nat_bflag       },
+	{"user_column",        STR_PARAM, &user_col.s        },
+	{"domain_column",      STR_PARAM, &domain_col.s      },
+	{"contact_column",     STR_PARAM, &contact_col.s     },
+	{"expires_column",     STR_PARAM, &expires_col.s     },
+	{"q_column",           STR_PARAM, &q_col.s           },
+	{"callid_column",      STR_PARAM, &callid_col.s      },
+	{"cseq_column",        STR_PARAM, &cseq_col.s        },
+	{"flags_column",       STR_PARAM, &flags_col.s       },
+	{"cflags_column",      STR_PARAM, &cflags_col.s      },
+	{"db_url",             STR_PARAM, &db_url.s          },
+	{"timer_interval",     INT_PARAM, &timer_interval    },
+	{"db_mode",            INT_PARAM, &db_mode           },
+	{"use_domain",         INT_PARAM, &use_domain        },
+	{"desc_time_order",    INT_PARAM, &desc_time_order   },
+	{"user_agent_column",  STR_PARAM, &user_agent_col.s  },
+	{"received_column",    STR_PARAM, &received_col.s    },
+	{"path_column",        STR_PARAM, &path_col.s        },
+	{"socket_column",      STR_PARAM, &sock_col.s        },
+	{"methods_column",     STR_PARAM, &methods_col.s     },
+	{"sip_instance_column",STR_PARAM, &sip_instance_col.s},
+	{"attr_column",        STR_PARAM, &attr_col.s        },
+	{"matching_mode",      INT_PARAM, &matching_mode     },
+	{"cseq_delay",         INT_PARAM, &cseq_delay        },
+	{"hash_size",          INT_PARAM, &ul_hash_size      },
+	{"nat_bflag",          STR_PARAM, &nat_bflag_str     },
+	{"nat_bflag",          INT_PARAM, &nat_bflag         },
+    /* data replication through UDP binary packets */
+	{ "accept_replicated_contacts",INT_PARAM, &accept_replicated_udata },
+	{ "replicate_contacts_to",     STR_PARAM|USE_FUNC_PARAM,
+	                            (void *)add_replication_dest           },
+	{ "skip_replicated_db_ops", INT_PARAM, &skip_replicated_db_ops     },
 	{0, 0, 0}
 };
 
@@ -232,6 +249,8 @@ static int mod_init(void)
 	path_col.len = strlen(path_col.s);
 	sock_col.len = strlen(sock_col.s);
 	methods_col.len = strlen(methods_col.s);
+	sip_instance_col.len = strlen(sip_instance_col.s);
+	attr_col.len = strlen(attr_col.s);
 	last_mod_col.len = strlen(last_mod_col.s);
 
 	if(ul_hash_size<=1)
@@ -285,8 +304,8 @@ static int mod_init(void)
 		}
 	}
 
-	fix_flag_name(&nat_bflag_str, nat_bflag);
-	
+	fix_flag_name(nat_bflag_str, nat_bflag);
+
 	nat_bflag = get_flag_id_by_name(FLAG_TYPE_BRANCH, nat_bflag_str);
 
 	if (nat_bflag==(unsigned int)-1) {
@@ -296,6 +315,18 @@ static int mod_init(void)
 		return -1;
 	} else {
 		nat_bflag = 1<<nat_bflag;
+	}
+
+	if (ul_event_init() < 0) {
+		LM_ERR("cannot initialize USRLOC events\n");
+		return -1;
+	}
+
+	/* register handler for processing usrloc packets from the bin interface */
+	if (accept_replicated_udata &&
+		bin_register_cb(repl_module_name.s, receive_binary_packet) < 0) {
+		LM_ERR("cannot register binary packet callback!\n");
+		return -1;
 	}
 
 	init_flag = 1;
@@ -314,9 +345,9 @@ static int child_init(int _rank)
 			return 0;
 		case DB_ONLY:
 		case WRITE_THROUGH:
-			/* we need connection from working SIP and TIMER and MAIN
-			 * processes only */
-			if (_rank<=0 && _rank!=PROC_TIMER && _rank!=PROC_MAIN)
+			/* we need connection from working SIP, BIN, TIMER and MAIN procs */
+			if (_rank <= 0 && _rank != PROC_BIN &&
+			    _rank != PROC_TIMER && _rank != PROC_MAIN)
 				return 0;
 			break;
 		case WRITE_BACK:
@@ -410,5 +441,47 @@ static void timer(unsigned int ticks, void* param)
 	}
 	if (sync_lock)
 		lock_stop_read(sync_lock);
+}
+
+static int add_replication_dest(modparam_t type, void *val)
+{
+	struct replication_dest *rd;
+	char *host;
+	int hlen, port;
+	int proto;
+	struct hostent *he;
+	str st;
+
+	rd = pkg_malloc(sizeof *rd);
+	memset(rd, 0, sizeof *rd);
+
+	if (parse_phostport(val, strlen(val), &host, &hlen, &port, &proto) < 0) {
+		LM_ERR("bad replication destination IP: '%s'!\n", (char *)val);
+		return -1;
+	}
+
+	if (proto == PROTO_NONE)
+		proto = PROTO_UDP;
+
+	if (proto != PROTO_UDP) {
+		LM_ERR("usrloc replication only supports UDP packets!\n");
+		return -1;
+	}
+
+	st.s = host;
+	st.len = hlen;
+	he = sip_resolvehost(&st, (unsigned short *)&port,
+	                          (unsigned short *)&proto, 0, 0);
+	if (!he) {
+		LM_ERR("cannot resolve host: %.*s\n", hlen, host);
+		return -1;
+	}
+
+	hostent2su(&rd->to, he, 0, port);
+
+	rd->next = replication_dests;
+	replication_dests = rd;
+
+	return 1;
 }
 

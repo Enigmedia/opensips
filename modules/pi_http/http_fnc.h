@@ -67,8 +67,8 @@ typedef struct ph_db_table_ {
 }ph_db_table_t;
 
 typedef struct ph_vals_ {
-	str *ids;
-	str *vals;
+	str *ids;  /* String to display for the given value */
+	str *vals; /* pre=populated value for a specific field */
 	int vals_size;
 }ph_vals_t;
 
@@ -79,11 +79,12 @@ typedef struct ph_cmd_ {
 	db_op_t *c_ops;
 	db_key_t *c_keys;
 	db_type_t *c_types;
-	ph_vals_t *c_vals;
+	ph_vals_t *c_vals; /* array of prepopulated values */
 	int c_keys_size;
 	db_key_t *q_keys;
 	db_type_t *q_types;
-	ph_vals_t *q_vals;
+	ph_vals_t *q_vals; /* array of prepopulated values */
+	str *link_cmd;     /* cmd to be executed for query links */
 	int q_keys_size;
 	db_key_t *o_keys;
 	int o_keys_size;
@@ -118,7 +119,8 @@ void ph_destroy_async_lock(void);
 
 int ph_init_cmds(ph_framework_t **framework_data, const char* filename);
 int ph_parse_url(const char* url, int* mod, int* cmd);
-int ph_run_pi_cmd(int mod, int cmd, void *connection, str *page, str *buffer);
+int ph_run_pi_cmd(int mod, int cmd, void *connection, void *con_cls,
+			str *page, str *buffer);
 
 #endif
 

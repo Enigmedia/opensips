@@ -28,8 +28,8 @@
 
 
 /*!
- * \file 
- * \brief MI :: Core 
+ * \file
+ * \brief MI :: Core
  * \ingroup mi
  */
 
@@ -186,6 +186,7 @@ static struct mi_root *mi_arg(struct mi_root *cmd, void *param)
 	if (rpl_tree==0)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	for ( n=0; n<my_argc ; n++ ) {
 		node = add_mi_node_child(rpl, 0, 0, 0, my_argv[n], strlen(my_argv[n]));
@@ -214,6 +215,7 @@ static struct mi_root *mi_which(struct mi_root *cmd, void *param)
 	if (rpl_tree==0)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	get_mi_cmds( &cmds, &size);
 	for ( i=0 ; i<size ; i++ ) {
@@ -245,6 +247,7 @@ static struct mi_root *mi_ps(struct mi_root *cmd, void *param)
 	if (rpl_tree==0)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
 	for ( i=0 ; i<counted_processes ; i++ ) {
 		node = add_mi_node_child(rpl, 0, MI_SSTR("Process"), 0, 0 );
@@ -349,7 +352,7 @@ static struct mi_root *mi_cachestore(struct mi_root *cmd, void *param)
 		LM_ERR( "empty memory cache system parameter\n");
 		return init_mi_tree(404, MI_SSTR("Empty memory cache id"));
 	}
-	
+
 	node = node->next;
 	if(node == NULL)
 		return init_mi_tree(404, MI_SSTR("Too few arguments"));
@@ -360,7 +363,7 @@ static struct mi_root *mi_cachestore(struct mi_root *cmd, void *param)
 		LM_ERR( "empty attribute name parameter\n");
 		return init_mi_tree(404, MI_SSTR("Empty attribute name"));
 	}
-	
+
 	node = node->next;
 	if(node == NULL)
 		return init_mi_tree(404, MI_SSTR("Too few arguments"));
@@ -388,7 +391,7 @@ static struct mi_root *mi_cachestore(struct mi_root *cmd, void *param)
 			return init_mi_tree(404,
 				MI_SSTR("Bad format for expires argument"));
 		}
-	
+
 		node = node->next;
 		if(node!= NULL)
 			return init_mi_tree(404, MI_SSTR("Too many parameters"));
@@ -429,7 +432,7 @@ static struct mi_root *mi_cachefetch(struct mi_root *cmd, void *param)
 		LM_ERR( "empty memory cache system parameter\n");
 		return init_mi_tree(404, MI_SSTR("Empty memory cache id"));
 	}
-	
+
 	node = node->next;
 	if(node == NULL)
 		return init_mi_tree(404, MI_SSTR("Too few arguments"));
@@ -440,7 +443,7 @@ static struct mi_root *mi_cachefetch(struct mi_root *cmd, void *param)
 		LM_ERR( "empty attribute name parameter\n");
 		return init_mi_tree(404,MI_SSTR( "Empty attribute name"));
 	}
-	
+
 	node = node->next;
 	if(node != NULL)
 		return init_mi_tree(404, MI_SSTR("Too many arguments"));
@@ -467,9 +470,9 @@ static struct mi_root *mi_cachefetch(struct mi_root *cmd, void *param)
 		goto done;
 	}
 
-	addf_mi_node_child( &rpl_tree->node, 0, 0, 0, "%.*s = [%.*s]", attr.len, 
+	addf_mi_node_child( &rpl_tree->node, 0, 0, 0, "%.*s = [%.*s]", attr.len,
 			attr.s, value.len, value.s);
-	
+
 	pkg_free(value.s);
 
 done:
@@ -499,7 +502,7 @@ static struct mi_root *mi_cacheremove(struct mi_root *cmd, void *param)
 		LM_ERR( "empty memory cache system parameter\n");
 		return init_mi_tree(404, MI_SSTR("Empty memory cache id"));
 	}
-	
+
 	node = node->next;
 	if(node == NULL)
 		return init_mi_tree(404, MI_SSTR("Too few arguments"));
@@ -510,7 +513,7 @@ static struct mi_root *mi_cacheremove(struct mi_root *cmd, void *param)
 		LM_ERR( "empty attribute name parameter\n");
 		return init_mi_tree(404, MI_SSTR("Empty attribute name"));
 	}
-	
+
 	node = node->next;
 	if(node != NULL)
 		return init_mi_tree(404, MI_SSTR("Too many parameters"));

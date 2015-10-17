@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
@@ -34,7 +34,7 @@
 #include "../../parser/msg_parser.h"
 #include "../../parser/parse_from.h"
 #include "../../db/db.h"
-#include "hash.h" 
+#include "hash.h"
 #include "pua.h"
 #include "send_publish.h"
 #include "../presence/hash.h"
@@ -50,27 +50,36 @@ static str str_remote_contact_col= str_init("remote_contact");
 
 void print_ua_pres(ua_pres_t* p)
 {
-	LM_DBG("\tpres_uri= %.*s   len= %d\n", p->pres_uri->len, p->pres_uri->s, p->pres_uri->len);
+	int now = (int)time(NULL);
+
+	LM_DBG("p=[%p] pres_uri=[%.*s]\n", p, p->pres_uri->len, p->pres_uri->s);
 	if(p->watcher_uri)
-	{	
-		LM_DBG("\twatcher_uri= %.*s  len= %d\n", p->watcher_uri->len, p->watcher_uri->s, p->watcher_uri->len);
-		LM_DBG("\tto_uri= %.*s  len= %d\n", p->to_uri.len, p->to_uri.s, p->to_uri.len);
-		LM_DBG("\tcall_id= %.*s   len= %d\n", p->call_id.len, p->call_id.s, p->call_id.len);
-		LM_DBG("\tfrom_tag= %.*s   len= %d\n", p->from_tag.len, p->from_tag.s, p->from_tag.len);
-		LM_DBG("\tto_tag= %.*s  len= %d\n", p->to_tag.len, p->to_tag.s, p->to_tag.len);
-	}	
+	{
+		LM_DBG("watcher_uri=[%.*s]\n", p->watcher_uri->len, p->watcher_uri->s);
+		LM_DBG("to_uri=[%.*s]\n", p->to_uri.len, p->to_uri.s);
+		LM_DBG("call_id=[%.*s]\n", p->call_id.len, p->call_id.s);
+		LM_DBG("from_tag=[%.*s]\n", p->from_tag.len, p->from_tag.s);
+		LM_DBG("to_tag=[%.*s]\n", p->to_tag.len, p->to_tag.s);
+		LM_DBG("etag=[%.*s]\n", p->etag.len, p->etag.s);
+	}
 	else
 	{
-		LM_DBG("\tetag= %.*s - len= %d\n", p->etag.len, p->etag.s, p->etag.len);
 		if(p->id.s)
-			LM_DBG("\tid= %.*s\n", p->id.len, p->id.s);
+			LM_DBG("etag=[%.*s] id=[%.*s]\n",
+				p->etag.len, p->etag.s, p->id.len, p->id.s);
+		else
+			LM_DBG("etag=[%.*s]\n", p->etag.len, p->etag.s);
 	}
-	LM_DBG("\tflag= %d\n", p->flag);
-	LM_DBG("\tevent= %d\n", p->event);
-	if(p->expires > (int)time(NULL))
-		LM_DBG("\texpires= %d\n", p->expires- (int)time(NULL));
+	LM_DBG("flag=[%d] event=[%d]\n", p->flag, p->event);
+	if (p->extra_headers.s && p->extra_headers.len)
+		LM_DBG("extra_headers=[%.*s]\n",
+				p->extra_headers.len, p->extra_headers.s);
+	if(p->expires > now)
+		LM_DBG("countdown=[%d] expires=[%d] desired_expires=[%d]\n",
+				p->expires - now, p->expires, p->desired_expires);
 	else
-		LM_DBG("\texpires= %d\n", p->expires);
+		LM_DBG("expires=[%d] desired_expires=[%d]\n",
+				p->expires, p->desired_expires);
 }
 
 htable_t* new_htable(void)
@@ -104,8 +113,8 @@ htable_t* new_htable(void)
 		if(H->p_records[i].entity== NULL)
 		{
 			LM_ERR("No more share memory\n");
-			goto error;		
-		}	
+			goto error;
+		}
 		H->p_records[i].entity->next= NULL;
 	}
 	return H;
@@ -195,8 +204,9 @@ ua_pres_t* search_htable(ua_pres_t* pres, unsigned int hash_code)
 	/* presentities with expires=0, waiting for reply and no etag are newly added
 	 * presentities which were not yet confirmed (no reply received for first PUBLISH)
 	 * and we should find such records !  -bogdan */
-		return 0;
+		return NULL;
 
+	LM_DBG("got presentity [%p]\n", p);
 	return p;
 }
 
@@ -245,7 +255,7 @@ int update_htable(unsigned int hash_index, unsigned int local_index,
 
 	if(contact)
 	{
-		if(!(p->remote_contact.len== contact->len && 
+		if(!(p->remote_contact.len== contact->len &&
 				strncmp(p->remote_contact.s, contact->s, contact->len)==0))
 		{
 			/* update remote contact */
@@ -288,8 +298,6 @@ ua_pres_t* new_ua_pres(publ_info_t* publ, str* tuple_id)
 
 	size= sizeof(ua_pres_t) + sizeof(str)+
 		publ->pres_uri->len+ publ->id.len;
-	if(publ->extra_headers)
-		size+= sizeof(str)+ publ->extra_headers->len;
 	if(publ->outbound_proxy.s)
 		size+= sizeof(str)+ publ->outbound_proxy.len;
 	if(tuple_id->s)
@@ -299,7 +307,7 @@ ua_pres_t* new_ua_pres(publ_info_t* publ, str* tuple_id)
 	if(presentity== NULL)
 	{
 		LM_ERR("no more share memory\n");
-		return 0;
+		goto error;
 	}
 	memset(presentity, 0, size);
 
@@ -307,7 +315,7 @@ ua_pres_t* new_ua_pres(publ_info_t* publ, str* tuple_id)
 	presentity->pres_uri= (str*)((char*)presentity+ size);
 	size+= sizeof(str);
 	presentity->pres_uri->s= (char*)presentity+ size;
-	memcpy(presentity->pres_uri->s, publ->pres_uri->s, 
+	memcpy(presentity->pres_uri->s, publ->pres_uri->s,
 			publ->pres_uri->len);
 	presentity->pres_uri->len= publ->pres_uri->len;
 	size+= publ->pres_uri->len;
@@ -315,14 +323,16 @@ ua_pres_t* new_ua_pres(publ_info_t* publ, str* tuple_id)
 //	presentity->id.s=(char*)presentity+ size;
 	CONT_COPY(presentity, presentity->id, publ->id);
 
-	if(publ->extra_headers)
+	if(publ->extra_headers && publ->extra_headers->s && publ->extra_headers->len)
 	{
-		presentity->extra_headers = (str*)((char*)presentity + size);
-		size+= sizeof(str);
-		presentity->extra_headers->s = (char*)presentity + size;
-		memcpy(presentity->extra_headers->s, publ->extra_headers->s, publ->extra_headers->len);
-		presentity->extra_headers->len = publ->extra_headers->len;
-		size+= publ->extra_headers->len;
+		presentity->extra_headers.s = (char*)shm_malloc(publ->extra_headers->len);
+		if(presentity->extra_headers.s == NULL)
+		{
+			LM_ERR("No more shared memory\n");
+			goto error;
+		}
+		memcpy(presentity->extra_headers.s, publ->extra_headers->s, publ->extra_headers->len);
+		presentity->extra_headers.len = publ->extra_headers->len;
 	}
 
 	if(publ->outbound_proxy.s)
@@ -343,6 +353,10 @@ ua_pres_t* new_ua_pres(publ_info_t* publ, str* tuple_id)
 	presentity->waiting_reply = 1;
 
 	return presentity;
+
+error:
+	if (presentity) shm_free(presentity);
+	return NULL;
 }
 
 /* insert in front; so when searching the most recent result is returned*/
@@ -377,7 +391,7 @@ unsigned long insert_htable(ua_pres_t* presentity)
 		(presentity->watcher_uri?presentity->watcher_uri->len:0),
 		(presentity->watcher_uri?presentity->watcher_uri->s:0));
 
-	hash_code= core_hash(s1, presentity->watcher_uri, 
+	hash_code= core_hash(s1, presentity->watcher_uri,
 			HASH_SIZE);
 	presentity->hash_index = hash_code;
 	LM_DBG("hash_code = %d\n", hash_code);
@@ -416,6 +430,12 @@ static void pua_db_delete(ua_pres_t* pres)
 	vals[n_query_cols].val.str_val = *pres->pres_uri;
 	n_query_cols++;
 
+	cols[n_query_cols] = &str_event_col;
+	vals[n_query_cols].type = DB_INT;
+	vals[n_query_cols].nul = 0;
+	vals[n_query_cols].val.int_val = pres->event;
+	n_query_cols++;
+
 	if(pres->flag)
 	{
 		cols[n_query_cols] = &str_flag_col;
@@ -424,12 +444,6 @@ static void pua_db_delete(ua_pres_t* pres)
 		vals[n_query_cols].val.int_val = pres->flag;
 		n_query_cols++;
 	}
-
-	cols[n_query_cols] = &str_event_col;
-	vals[n_query_cols].type = DB_INT;
-	vals[n_query_cols].nul = 0;
-	vals[n_query_cols].val.int_val = pres->event;
-	n_query_cols++;
 
 	if(pres->id.s && pres->id.len)
 	{
@@ -447,7 +461,7 @@ static void pua_db_delete(ua_pres_t* pres)
 		vals[n_query_cols].nul = 0;
 		vals[n_query_cols].val.str_val = *pres->watcher_uri;
 		n_query_cols++;
-	
+
 		if(pres->remote_contact.s)
 		{
 			cols[n_query_cols] = &str_remote_contact_col;
@@ -468,7 +482,7 @@ static void pua_db_delete(ua_pres_t* pres)
 			n_query_cols++;
 		}
 	}
-	/* should not search after etag because I don't know if it has been updated */	
+	/* should not search after etag because I don't know if it has been updated */
 
 	if(pua_dbf.use_table(pua_db, &db_table)< 0)
 	{
@@ -490,12 +504,11 @@ void free_htable_entry(ua_pres_t* p)
 	pua_db_delete(p);
 
 	if(p->etag.s)
-	{
 		shm_free(p->etag.s);
-	}
-	else
 	if(p->remote_contact.s)
 		shm_free(p->remote_contact.s);
+	if(p->extra_headers.s)
+		shm_free(p->extra_headers.s);
 	shm_free(p);
 }
 
@@ -551,6 +564,7 @@ void destroy_htable(void)
 			else
 				if(q->remote_contact.s)
 					shm_free(q->remote_contact.s);
+			if(q->extra_headers.s) shm_free(q->extra_headers.s);
 			shm_free(q);
 			q= NULL;
 		}
@@ -676,7 +690,7 @@ int is_dialog(ua_pres_t* dialog)
 	else
 		ret_code= 0;
 	lock_release(&HashT->p_records[hash_code].lock);
-	
+
 	return ret_code;
 
 }
@@ -699,8 +713,8 @@ int update_contact(struct sip_msg* msg, char* str1, char* str2)
 	{
 		LM_ERR("cannot parse callid header\n");
 		return -1;
-	}		
-	
+	}
+
 	if (!msg->from || !msg->from->body.s)
 	{
 		LM_ERR("cannot find 'from' header!\n");
@@ -708,26 +722,26 @@ int update_contact(struct sip_msg* msg, char* str1, char* str2)
 	}
 	if (msg->from->parsed == NULL)
 	{
-		if ( parse_from_header( msg )<0 ) 
+		if ( parse_from_header( msg )<0 )
 		{
 			LM_ERR("cannot parse From header\n");
 			return -1;
 		}
 	}
-	
+
 	pfrom = (struct to_body*)msg->from->parsed;
-	
+
 	if( pfrom->tag_value.s ==NULL || pfrom->tag_value.len == 0)
 	{
 		LM_ERR("no from tag value present\n");
 		return -1;
-	}		
-	
+	}
+
 	if( msg->to==NULL || msg->to->body.s==NULL)
 	{
 		LM_ERR("cannot parse TO header\n");
 		return -1;
-	}			
+	}
 
 	pto = get_to(msg);
 	if (pto == NULL || pto->error != PARSE_OK) {
@@ -747,11 +761,11 @@ int update_contact(struct sip_msg* msg, char* str1, char* str2)
 	hentity.flag = BLA_SUBSCRIBE | XMPP_SUBSCRIBE | XMPP_INITIAL_SUBS |
 		MI_SUBSCRIBE | RLS_SUBSCRIBE;
 	hentity.watcher_uri= &pto->uri;
-	hentity.to_uri= pfrom->uri; 
+	hentity.to_uri= pfrom->uri;
 	hentity.call_id=  msg->callid->body;
 	hentity.to_tag= pto->tag_value;
 	hentity.from_tag= pfrom->tag_value;
-	
+
 	hash_code= core_hash(&hentity.to_uri,hentity.watcher_uri,
 				HASH_SIZE);
 
@@ -773,9 +787,7 @@ int update_contact(struct sip_msg* msg, char* str1, char* str2)
 		return -1;
 	}
 
-	shm_free(p->remote_contact.s);
-
-	if(!(p->remote_contact.len== contact.len && 
+	if(!(p->remote_contact.len== contact.len &&
 				strncmp(p->remote_contact.s, contact.s, contact.len)==0))
 	{
 		/* update remote contact */

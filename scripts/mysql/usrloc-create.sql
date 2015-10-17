@@ -1,4 +1,4 @@
-INSERT INTO version (table_name, table_version) values ('location','1007');
+INSERT INTO version (table_name, table_version) values ('location','1009');
 CREATE TABLE location (
     id INT(10) UNSIGNED AUTO_INCREMENT PRIMARY KEY NOT NULL,
     username CHAR(64) DEFAULT '' NOT NULL,
@@ -12,11 +12,12 @@ CREATE TABLE location (
     cseq INT(11) DEFAULT 13 NOT NULL,
     last_modified DATETIME DEFAULT '1900-01-01 00:00:01' NOT NULL,
     flags INT(11) DEFAULT 0 NOT NULL,
-    cflags INT(11) DEFAULT 0 NOT NULL,
+    cflags CHAR(255) DEFAULT NULL,
     user_agent CHAR(255) DEFAULT '' NOT NULL,
     socket CHAR(64) DEFAULT NULL,
     methods INT(11) DEFAULT NULL,
     sip_instance CHAR(255) DEFAULT NULL,
+    attr CHAR(255) DEFAULT NULL,
     CONSTRAINT account_contact_idx UNIQUE (username, domain, contact, callid)
 ) ENGINE=MyISAM;
 

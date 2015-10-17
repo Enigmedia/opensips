@@ -1,5 +1,5 @@
-/* 
- * $Id$ 
+/*
+ * $Id$
  *
  * Usrloc domain structure
  *
@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 /*
@@ -45,7 +45,6 @@
 #include "../../db/db_insertq.h"
 #include "urecord.h"
 #include "hslot.h"
-
 
 struct hslot;   /*!< Hash table slot */
 struct urecord; /*!< Usrloc record */
@@ -159,8 +158,10 @@ void unlock_ulslot(udomain_t* _d, int slot);
 /*! \brief
  * Create and insert a new record
  */
-typedef int (*insert_urecord_t)(udomain_t* _d, str* _aor, struct urecord** _r);
-int insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r);
+typedef int (*insert_urecord_t)(udomain_t* _d, str* _aor, struct urecord** _r,
+                                char is_replicated);
+int insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r,
+                   char is_replicated);
 
 
 /*! \brief
@@ -173,8 +174,10 @@ int get_urecord(udomain_t* _d, str* _aor, struct urecord** _r);
 /*! \brief
  * Delete a urecord from domain
  */
-typedef int  (*delete_urecord_t)(udomain_t* _d, str* _a, struct urecord* _r);
-int delete_urecord(udomain_t* _d, str* _aor, struct urecord* _r);
+typedef int  (*delete_urecord_t)(udomain_t* _d, str* _a, struct urecord* _r,
+                                 char is_replicated);
+int delete_urecord(udomain_t* _d, str* _aor, struct urecord* _r,
+                   char is_replicated);
 
 
 

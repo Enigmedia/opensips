@@ -47,6 +47,9 @@
 #define IN_OUT
 #define MAX_UNKNOWN_ATTRIBUTES 12
 
+#define ADV_IP(ip, adv_ip) (adv_ip != -1 ? adv_ip : ip)
+#define ADV_PORT(port, adv_port) (adv_port ? adv_port : port)
+
 /* types */
 typedef char        Bool;
 typedef char        T8;
@@ -57,7 +60,7 @@ typedef uint32_t    T32;
 typedef enum {
                 FALSE = 0,
                 TRUE =1
-                        
+
 } Boolean;
 
 typedef enum {
@@ -131,13 +134,13 @@ typedef struct stun_message{
     StunAddr*	mappedAddress;	    /* host order */
 
     Bool	hasResponceAddress;
-    StunAddr*	responceAddress;    
+    StunAddr*	responceAddress;
 
     Bool	hasSourceAddress;
-    StunAddr*	sourceAddress;	    
+    StunAddr*	sourceAddress;
 
     Bool	hasChangedAddress;
-    StunAddr*	changedAddress;	    
+    StunAddr*	changedAddress;
 
     Bool	hasReflectedFrom;
     StunAddr*	reflectedFromAddress;

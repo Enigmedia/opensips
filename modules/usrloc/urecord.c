@@ -1,5 +1,5 @@
-/* 
- * $Id$ 
+/*
+ * $Id$
  *
  * Usrloc record structure
  *
@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -44,6 +44,7 @@
 #include "ul_mod.h"
 #include "utime.h"
 #include "ul_callback.h"
+#include "ureplication.h"
 
 
 int matching_mode = CONTACT_ONLY;
@@ -91,7 +92,7 @@ void free_urecord(urecord_t* _r)
 		_r->contacts = _r->contacts->next;
 		free_ucontact(ptr);
 	}
-	
+
 	/* if mem cache is not used, the urecord struct is static*/
 	if (db_mode!=DB_ONLY) {
 		if (_r->aor.s) shm_free(_r->aor.s);
@@ -114,7 +115,7 @@ void print_urecord(FILE* _f, urecord_t* _r)
 	fprintf(_f, "aor    : '%.*s'\n", _r->aor.len, ZSW(_r->aor.s));
 	fprintf(_f, "aorhash: '%u'\n", (unsigned)_r->aorhash);
 	fprintf(_f, "slot:    '%d'\n", _r->aorhash&(_r->slot->d->size-1));
-	
+
 	if (_r->contacts) {
 		ptr = _r->contacts;
 		while(ptr) {
@@ -129,7 +130,7 @@ void print_urecord(FILE* _f, urecord_t* _r)
 
 /*! \brief
  * Add a new contact
- * Contacts are ordered by: 1) q 
+ * Contacts are ordered by: 1) q
  *                          2) descending modification time
  */
 ucontact_t* mem_insert_ucontact(urecord_t* _r, str* _c, ucontact_info_t* _ci)
@@ -191,7 +192,7 @@ void mem_remove_ucontact(urecord_t* _r, ucontact_t* _c)
 			_c->next->prev = 0;
 		}
 	}
-}	
+}
 
 
 
@@ -274,7 +275,7 @@ static inline int wt_timer(urecord_t* _r)
 			ptr = ptr->next;
 		}
 	}
-	
+
 	return 0;
 }
 
@@ -413,11 +414,15 @@ int db_delete_urecord(urecord_t* _r)
  * Release urecord previously obtained
  * through get_urecord
  */
-void release_urecord(urecord_t* _r)
+void release_urecord(urecord_t* _r, char is_replicated)
 {
 	if (db_mode==DB_ONLY) {
 		free_urecord(_r);
 	} else if (_r->contacts == 0) {
+
+		if (!is_replicated && replication_dests)
+			replicate_urecord_delete(_r);
+
 		mem_delete_urecord(_r->slot->d, _r);
 	}
 }
@@ -428,12 +433,15 @@ void release_urecord(urecord_t* _r)
  * into urecord
  */
 int insert_ucontact(urecord_t* _r, str* _contact, ucontact_info_t* _ci,
-															ucontact_t** _c)
+                    ucontact_t** _c, char is_replicated)
 {
 	if ( ((*_c)=mem_insert_ucontact(_r, _contact, _ci)) == 0) {
 		LM_ERR("failed to insert contact\n");
 		return -1;
 	}
+
+	if (!is_replicated && replication_dests && db_mode != DB_ONLY)
+		replicate_ucontact_insert(_r, _contact, _ci);
 
 	if (exists_ulcb_type(UL_CONTACT_INSERT)) {
 		run_ul_callbacks( UL_CONTACT_INSERT, *_c);
@@ -454,8 +462,11 @@ int insert_ucontact(urecord_t* _r, str* _contact, ucontact_info_t* _ci,
 /*! \brief
  * Delete ucontact from urecord
  */
-int delete_ucontact(urecord_t* _r, struct ucontact* _c)
+int delete_ucontact(urecord_t* _r, struct ucontact* _c, char is_replicated)
 {
+	if (!is_replicated && replication_dests && db_mode != DB_ONLY)
+		replicate_ucontact_delete(_r, _c);
+
 	if (exists_ulcb_type(UL_CONTACT_DELETE)) {
 		run_ul_callbacks( UL_CONTACT_DELETE, _c);
 	}
@@ -480,7 +491,7 @@ static inline struct ucontact* contact_match( ucontact_t* ptr, str* _c)
 		if ((_c->len == ptr->c.len) && !memcmp(_c->s, ptr->c.s, _c->len)) {
 			return ptr;
 		}
-		
+
 		ptr = ptr->next;
 	}
 	return 0;
@@ -497,7 +508,7 @@ static inline struct ucontact* contact_callid_match( ucontact_t* ptr,
 		) {
 			return ptr;
 		}
-		
+
 		ptr = ptr->next;
 	}
 	return 0;

@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -33,10 +33,13 @@
 
 #include "../../data_lump.h"
 #include "../tm/tm_load.h"
+#include "../../mod_fix.h"
+#include "../../parser/contact/parse_contact.h"
 #include "dlg_tophiding.h"
 #include "dlg_handlers.h"
 
 extern struct tm_binds d_tmb;
+extern str rr_param;
 
 #define RECORD_ROUTE "Record-Route: "
 #define RECORD_ROUTE_LEN (sizeof(RECORD_ROUTE)-1)
@@ -75,12 +78,13 @@ int dlg_del_vias(struct sip_msg* req)
 
 int dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 {
-//	str local_contact;
 	struct lump* lump, *crt, *prev_crt =0, *a, *foo;
 	int offset;
 	int len,n;
-	char *prefix=NULL,*suffix=NULL,*p,*p_init;
-	int prefix_len,suffix_len;
+	char *prefix=NULL,*suffix=NULL,*p,*p_init,*ct_username=NULL;
+	int prefix_len,suffix_len,ct_username_len=0;
+	struct sip_uri ctu;
+	str contact;
 
 	if(!msg->contact)
 	{
@@ -94,6 +98,27 @@ int dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 	}
 
 	prefix_len = 5; /* <sip: */
+
+	if (dlg->flags & DLG_FLAG_TOPH_KEEP_USER) {
+		if ( parse_contact(msg->contact)<0 ||
+			((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
+			((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
+				LM_ERR("bad Contact HDR\n");
+		} else {
+			contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
+			if(parse_uri(contact.s, contact.len, &ctu) < 0) {
+				LM_ERR("Bad Contact URI \n");
+			} else {
+				ct_username = ctu.user.s;
+				ct_username_len = ctu.user.len;
+				LM_DBG("Trying to propagate username [%.*s] \n",ct_username_len,
+									ct_username);
+				if (ct_username_len > 0)
+					prefix_len += 1 + /* @ */ + ct_username_len;
+			}
+		}
+	}
+
 	prefix = pkg_malloc(prefix_len);
 	if (!prefix) {
 		LM_ERR("no more pkg\n");
@@ -108,11 +133,15 @@ int dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 	}
 
 	memcpy(prefix,"<sip:",prefix_len);
-	
+	if (dlg->flags & DLG_FLAG_TOPH_KEEP_USER && ct_username_len > 0) {
+		memcpy(prefix+5,ct_username,ct_username_len);
+		prefix[prefix_len-1] = '@';
+	}
+
 	p_init = p = suffix;
 	*p++ = ';';
-	memcpy(p,"did",3);
-	p+=3;
+	memcpy(p,rr_param.s,rr_param.len);
+	p+=rr_param.len;
 	*p++ = '=';
 
 	n = RR_DLG_PARAM_SIZE - (p-p_init);
@@ -182,6 +211,8 @@ int dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 		LM_ERR("failed inserting '<sip:'\n");
 		goto error;
 	}
+	/* make sure we do not free this string in case of a further error */
+	prefix = NULL;
 
 	if ((lump = insert_subst_lump_after(lump, SUBST_SND_ALL, HDR_CONTACT_T)) == 0) {
 		LM_ERR("failed inserting SUBST_SND buf\n");
@@ -192,8 +223,7 @@ int dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 		LM_ERR("failed inserting '<sip:'\n");
 		goto error;
 	}
-	
-//	LM_DBG("Replaced contact with [%.*s]\n", local_contact.len, local_contact.s);
+
 
 	return 0;
 error:
@@ -213,6 +243,8 @@ int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl, struct sip_msg *re
 	char* route,*p;
 	str via_str;
 	struct dlg_leg* leg;
+	char *received_buf=0,*rport_buf=0;
+	unsigned int rport_len=0,received_len=0;
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(rpl, HDR_EOH_F, 0)< 0) {
@@ -253,40 +285,197 @@ int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl, struct sip_msg *re
 		return -1;
 	}
 
-	it = req->h_via1;
-	via_str.len = 0;
-	while (it) {
-		via_str.len += it->len;
-		it = it->sibling;
-	}
+	if ((req->msg_flags&FL_FORCE_RPORT)||(req->via1->rport)) {
+		if ((received_buf=received_builder(req,&received_len))==0){
+			LM_ERR("received_builder failed\n");
+			return -1;
+		}
 
-	LM_DBG("via len = %d\n",via_str.len);
+		if ((rport_buf=rport_builder(req, &rport_len))==0){
+			LM_ERR("rport_builder failed\n");
+			return -1;
+		}
+		
+		/* take care of via1 + rest of VIA headers in h_via1 */
+		via_str.len = rport_len + received_len + req->h_via1->len;
+		LM_DBG("via len = %d\n",via_str.len);
+		if (req->via1->received) {
+			via_str.len -= req->via1->received->size+1;
+			LM_INFO(" have received will remove %d \n",req->via1->received->size+1);
+		}
+		if (req->via1->rport) {
+			via_str.len -= req->via1->rport->size+1;
+			LM_INFO(" have rport will remove %d \n",req->via1->rport->size+1);
+		}
 
-	if (via_str.len == 0)
-		goto restore_rr;
+		/* copy rest of VIA headers */
+		it = req->h_via1->sibling;
+		while (it) {
+			via_str.len += it->len;
+			it = it->sibling;
+		}
 
-	via_str.s = pkg_malloc(via_str.len);
-	if (!via_str.s) {
-		LM_ERR("no more pkg mem\n");
-		return -1;
-	}
+		via_str.s = pkg_malloc(via_str.len);
+		if (!via_str.s) {
+			LM_ERR("No more pkg mem\n");
+			goto err_free_rport;
+		}
 
-	LM_DBG("allocated via_str %p\n",via_str.s);
+		/* take care of via1 + rest of VIA headers in h_via1 */
+		if (req->via1->params.s){
+			size= req->via1->params.s-req->via1->hdr.s-1; /*compensate for ';' */
+		}else{
+			size= req->via1->host.s-req->via1->hdr.s+req->via1->host.len;
+			if (req->via1->port!=0){
+				size += req->via1->port_str.len + 1; /* +1 for ':'*/
+			}
+		}
 
-	it = req->h_via1;
-	p = via_str.s;
-	while (it) {
-		memcpy(p,it->name.s,it->len);
-		p+=it->len;
-		it = it->sibling;
-	}
+		p = via_str.s;
+		memcpy(p,req->via1->hdr.s,size);
+		p += size;
+		memcpy(p,received_buf,received_len);
+		p += received_len;
+		memcpy(p,rport_buf,rport_len);
+		p += rport_len;
 
-	LM_DBG("inserting via headers - [%.*s]\n",via_str.len,via_str.s);
+		int bytes_before = 0;
+		int bytes_after = 0;
+		int bytes_between = 0;
+		char *between = NULL;
+		char *after = NULL;
 
-	if ((lmp = insert_new_lump_after(lmp, via_str.s, via_str.len, 0)) == 0) {
-		LM_ERR("failed inserting new old vias\n");
-		pkg_free(via_str.s);
-		return -1;
+		if (req->via1->received) {
+			if (!req->via1->rport) {
+				bytes_before = req->via1->received->start-req->via1->hdr.s-size-1;
+				memcpy(p,
+				req->via1->hdr.s+size,
+				bytes_before);
+				p += bytes_before;
+				
+				bytes_after = req->h_via1->len - size - req->via1->received->size -
+						bytes_before - 1; 
+				memcpy(p,
+				req->via1->received->start+req->via1->received->size,
+				bytes_after);
+				p += bytes_after;
+			} else {
+				/* we have both :( */
+				if (req->via1->rport->start > req->via1->received->start) {
+					bytes_before = req->via1->received->start-req->via1->hdr.s-size-1;
+					bytes_between = req->via1->rport->start - req->via1->received->start - req->via1->received->size - 1;
+					between = req->via1->received->start + req->via1->received->size;
+					after = req->via1->rport->start+req->via1->rport->size;
+
+					bytes_after = req->h_via1->len - size - req->via1->rport->size -
+							bytes_before - 1 - bytes_between - req->via1->received->size  - 1; 
+					LM_DBG("1 both , before = %d, between = %d, after = %d\n",bytes_before,bytes_between,bytes_after);
+				} else {
+					bytes_before = req->via1->rport->start-req->via1->hdr.s-size-1;
+					bytes_between = req->via1->received->start - req->via1->rport->start - req->via1->rport->size - 1;
+					between = req->via1->rport->start + req->via1->rport->size;
+
+					after = req->via1->received->start+req->via1->received->size;
+
+					bytes_after = req->h_via1->len - size - req->via1->rport->size -
+							bytes_before - 1 - bytes_between - req->via1->received->size -1 ; 
+					LM_DBG("2 both , before = %d, between = %d, after = %d\n",bytes_before,bytes_between,bytes_after);
+				}
+
+				memcpy(p,
+				req->via1->hdr.s+size,
+				bytes_before);
+				p += bytes_before;	
+
+				memcpy(p,
+				between,
+				bytes_between);
+				p += bytes_between;	
+
+				memcpy(p,
+				after,
+				bytes_after);
+				p += bytes_after;	
+			}
+		} else if (req->via1->rport) {
+			if (!req->via1->received) {
+				bytes_before = req->via1->rport->start-req->via1->hdr.s-size-1;
+				memcpy(p,
+				req->via1->hdr.s+size,
+				bytes_before);
+				p += bytes_before;
+				
+				bytes_after = req->h_via1->len - size - req->via1->rport->size -
+						bytes_before - 1; 
+				memcpy(p,
+				req->via1->rport->start+req->via1->rport->size,
+				bytes_after);
+				p += bytes_after;
+			}
+		} else {
+			/* no rport or received already present */
+			memcpy(p,req->via1->hdr.s+size,req->h_via1->len-size);
+			p+= req->h_via1->len-size;
+		}
+
+		/* copy rest of VIA headers */
+		it = req->h_via1->sibling;
+		while (it) {
+			memcpy(p,it->name.s,it->len);
+			p+=it->len;
+			it = it->sibling;
+		}
+
+		LM_DBG("built [%.*s], %d %d\n",(int)(p-via_str.s),via_str.s,(int)(p-via_str.s),via_str.len);
+
+		if ((lmp = insert_new_lump_after(lmp, via_str.s, via_str.len, 0)) == 0) {
+			LM_ERR("failed inserting new old vias\n");
+			pkg_free(via_str.s);
+			goto err_free_rport;
+		}
+			
+		pkg_free(rport_buf);
+		pkg_free(received_buf);
+
+	} else {
+		/* no need to add received/rport , just copy the headers altogether */
+		it = req->h_via1;
+		via_str.len = 0;
+
+		while (it) {
+			via_str.len += it->len;
+			it = it->sibling;
+		}
+
+		LM_DBG("via len = %d\n",via_str.len);
+
+		if (via_str.len == 0)
+			goto restore_rr;
+
+		via_str.s = pkg_malloc(via_str.len);
+		if (!via_str.s) {
+			LM_ERR("no more pkg mem\n");
+			return -1;
+		}
+
+		LM_DBG("allocated via_str %p\n",via_str.s);
+
+		it = req->h_via1;
+		p = via_str.s;
+		while (it) {
+			memcpy(p,it->name.s,it->len);
+			p+=it->len;
+			it = it->sibling;
+		}
+
+		LM_DBG("inserting via headers - [%.*s]\n",via_str.len,via_str.s);
+
+		if ((lmp = insert_new_lump_after(lmp, via_str.s, via_str.len, 0)) == 0) {
+			LM_ERR("failed inserting new old vias\n");
+			pkg_free(via_str.s);
+			return -1;
+		}
+
 	}
 
 restore_rr:
@@ -318,10 +507,15 @@ restore_rr:
 	}
 
 	return 0;
+
+err_free_rport:
+	pkg_free(rport_buf);
+	pkg_free(received_buf);
+	return -1;
 }
 
 /* hide via, route sets and contacts */
-int w_topology_hiding(struct sip_msg *req)
+static int topology_hiding(struct sip_msg *req,int extra_flags)
 {
 	struct dlg_cell *dlg;
 	struct hdr_field *it;
@@ -346,6 +540,7 @@ int w_topology_hiding(struct sip_msg *req)
 	}
 
 	dlg->flags |= DLG_FLAG_TOPHIDING;
+	dlg->flags |= extra_flags;
 
 	/* delete also the added record route and the did param */
 	for(crt=req->add_rm; crt;) {
@@ -353,7 +548,7 @@ int w_topology_hiding(struct sip_msg *req)
 		if(crt->type != HDR_RECORDROUTE_T)
 			/* check on before list for parameters */
 			for( lump=crt->before ; lump ; lump=lump->before ) {
-				/* we are looking for the lump that adds the 
+				/* we are looking for the lump that adds the
 				 * suffix of the RR header */
 				if ( lump->type==HDR_RECORDROUTE_T && lump->op==LUMP_ADD)
 				{
@@ -428,6 +623,39 @@ int w_topology_hiding(struct sip_msg *req)
 	}
 
 	return 1;
+}
+
+int w_topology_hiding1(struct sip_msg *req,char *param)
+{
+	str res = {0,0};
+	int flags=0;
+	char *p;
+
+	if (fixup_get_svalue(req, (gparam_p)param, &res) !=0)
+	{
+		LM_ERR("no create dialog flags\n");
+		return -1;
+	}
+
+	for (p=res.s;p<res.s+res.len;p++)
+	{
+		switch (*p)
+		{
+			case 'U':
+				flags |= DLG_FLAG_TOPH_KEEP_USER;
+				LM_DBG("Will preserve usernames while doing topo hiding \n");
+				break;
+			default:
+				LM_DBG("unknown topology_hiding flag : [%c] . Skipping\n",*p);
+		}
+	}
+
+	return topology_hiding(req,flags);
+}
+
+int w_topology_hiding(struct sip_msg *req)
+{
+	return topology_hiding(req,0);
 }
 
 void dlg_th_down_onreply(struct cell* t, int type,struct tmcb_params *param)

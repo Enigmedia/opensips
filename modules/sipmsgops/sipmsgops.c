@@ -14,8 +14,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
@@ -42,7 +42,7 @@
  *  2004-07-06  subst_user added (like subst_uri but only for user) (sobomax)
  *  2004-11-12  subst_user changes (old serdev mails) (andrei)
  *  2005-07-05  is_method("name") to check method using id (ramona)
- *  2006-03-17  applied patch from Marc Haisenko <haisenko@comdasys.com> 
+ *  2006-03-17  applied patch from Marc Haisenko <haisenko@comdasys.com>
  *              for adding has_body() function (bogdan)
  *  2009-07-23  added methods for sdp codec manipulation(andreidragus)
  *  2012-02-21  add change_reply_status (idea from kamailio/textopsx) (rpedraza)
@@ -128,7 +128,7 @@ static int strip_body_f2(struct sip_msg *msg, char *str1, char *str2 );
 static int add_body_f_1(struct sip_msg *msg, char *str1, char *str2 );
 static int add_body_f_2(struct sip_msg *msg, char *str1, char *str2 );
 static int is_audio_on_hold_f(struct sip_msg *msg, char *str1, char *str2 );
-static int w_sip_validate(struct sip_msg *msg, char *flags_s);
+static int w_sip_validate(struct sip_msg *msg, char *flags_s, char* pv_result);
 
 static int hname_fixup(void** param, int param_no);
 static int free_hname_fixup(void** param, int param_no);
@@ -157,10 +157,10 @@ static cmd_export_t cmds[]={
 	{"append_hf",        (cmd_function)append_hf_2,       2,
 		add_header_fixup, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
-	{"insert_hf",        (cmd_function)insert_hf_1,       1, 
+	{"insert_hf",        (cmd_function)insert_hf_1,       1,
 		add_header_fixup, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
-	{"insert_hf",        (cmd_function)insert_hf_2,       2, 
+	{"insert_hf",        (cmd_function)insert_hf_2,       2,
 		add_header_fixup, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 	{"append_urihf",     (cmd_function)append_urihf,      2,
@@ -187,7 +187,7 @@ static cmd_export_t cmds[]={
 	{"has_body",         (cmd_function)has_body_f,        0,
 		0, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
-	{"has_body",         (cmd_function)has_body_f,        1, 
+	{"has_body",         (cmd_function)has_body_f,        1,
 		fixup_body_type, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 	{"is_privacy",       (cmd_function)is_privacy_f,      1,
@@ -199,10 +199,10 @@ static cmd_export_t cmds[]={
 	{"strip_body",      (cmd_function)strip_body_f2,     1,
 		fixup_body_type, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE },
-	{"add_body",         (cmd_function)add_body_f_1,        1, 
+	{"add_body",         (cmd_function)add_body_f_1,        1,
 		fixup_spve_null, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
-	{"add_body",         (cmd_function)add_body_f_2,        2, 
+	{"add_body",         (cmd_function)add_body_f_2,        2,
 		add_header_fixup, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 	{"codec_exists",	(cmd_function)codec_find,	1,
@@ -251,6 +251,9 @@ static cmd_export_t cmds[]={
 		0, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE},
 	{"sipmsg_validate",     (cmd_function)w_sip_validate,       1,
+		fixup_sip_validate, 0,
+		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE},
+	{"sipmsg_validate",     (cmd_function)w_sip_validate,       2,
 		fixup_sip_validate, 0,
 		REQUEST_ROUTE|ONREPLY_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE},
 	{"change_reply_status", (cmd_function)change_reply_status_f, 2,
@@ -332,11 +335,11 @@ static int filter_body_f(struct sip_msg* msg, char* _content_type,
 		LM_DBG("message body has zero length\n");
 		return -1;
 	}
-	
+
 	content_type = (str *)_content_type;
 	start = body.s;
 	len = body.len;
-	
+
 	while (find_line_start("Content-Type: ", 14, &start, &len)) {
 	    start = start + 14;
 	    len = len - 14;
@@ -383,19 +386,17 @@ static int filter_body_f(struct sip_msg* msg, char* _content_type,
 	return -1;
 }
 
-int parse_pvs_header(struct sip_msg *msg, gparam_p gp)
+int get_pvs_header_value(struct sip_msg *msg, gparam_p gp, pv_value_p ret)
 {
-	pv_value_t pval;
 	struct hdr_field hdr;
 	int hdr_len;
-	
-	if (pv_get_spec_value(msg, gp->v.pvs, &pval) != 0 || pval.flags & PV_VAL_NULL)
-	{
-		LM_ERR("no valid PV value found!\n");
+
+	if (fixup_get_svalue(msg, gp, &ret->rs) != 0) {
+		LM_ERR("failed to get the string value\n");
 		return -1;
 	}
 
-	hdr_len = pval.rs.len + 1;
+	hdr_len = ret->rs.len + 1;
 	if (header_body.len < hdr_len)
 	{
 		header_body.s = pkg_realloc(header_body.s, hdr_len);
@@ -408,32 +409,37 @@ int parse_pvs_header(struct sip_msg *msg, gparam_p gp)
 		header_body.len = hdr_len;
 	}
 
-	memcpy(header_body.s, pval.rs.s, pval.rs.len);
-	header_body.s[pval.rs.len] = ':';
+	memcpy(header_body.s, ret->rs.s, ret->rs.len);
+	header_body.s[ret->rs.len] = ':';
 
 	LM_DBG("Parsing %.*s\n", hdr_len, header_body.s);
-	if (parse_hname2(header_body.s, header_body.s + 
-					(hdr_len < 4 ? 4 : hdr_len), &hdr) == 0)
+	if (parse_hname2(header_body.s, header_body.s + hdr_len, &hdr) == 0)
 	{
-		LM_ERR("error parsing header name\n");
-		pkg_free(gp);
+		LM_ERR("error parsing header name '%.*s'\n", ret->rs.len, ret->rs.s);
 		return E_UNSPEC;
 	}
 
-	if (hdr.type!=HDR_OTHER_T && hdr.type!=HDR_ERROR_T)
+	if (hdr.type != HDR_OTHER_T && hdr.type != HDR_ERROR_T)
 	{
-		LM_INFO("using hdr type (%d) instead of <%.*s>\n",
-				hdr.type, pval.rs.len, header_body.s);
-		gp->v.ival = hdr.type;
-		gp->type = GPARAM_TYPE_INT;
-	} else {
-		gp->type = GPARAM_TYPE_STR;
-		gp->v.sval.s = header_body.s;
-		gp->v.sval.len = pval.rs.len;
-
-		LM_INFO("using hdr type name <%.*s>\n", gp->v.sval.len, gp->v.sval.s);
+		LM_DBG("using hdr type (%d) instead of <%.*s>\n",
+				hdr.type, ret->rs.len, ret->rs.s);
+		ret->flags = PV_VAL_INT;
+		ret->ri = hdr.type;
 	}
 
+	return 0;
+}
+
+static int hf_already_removed(struct sip_msg* msg, unsigned int offset,
+		unsigned int len, enum _hdr_types_t type)
+{
+	struct lump *it;
+	/* parse only the msg headers, not the body */
+	for (it = msg->add_rm; it; it = it->next) {
+		if (it->op == LUMP_DEL && it->type == type &&
+			it->u.offset == offset && it->len == len)
+			return 1;
+	}
 	return 0;
 }
 
@@ -442,37 +448,44 @@ static int remove_hf_f(struct sip_msg* msg, char* str_hf, char* foo)
 	struct hdr_field *hf;
 	struct lump* l;
 	int cnt;
-	gparam_p gp;
+	pv_value_t pval;
 
-	gp = (gparam_p)str_hf;
 	cnt=0;
 
-	if (gp->type == GPARAM_TYPE_PVS &&
-		parse_pvs_header(msg, gp) != 0)
-	{
-		LM_ERR("Parse pvs header failed!\n");
+	pval.flags = PV_VAL_NONE;
+
+	if (((gparam_p)str_hf)->type == GPARAM_TYPE_INT) {
+		pval.flags = PV_VAL_INT;
+		pval.ri = ((gparam_p)str_hf)->v.ival;
+	} else if (get_pvs_header_value(msg, (gparam_p)str_hf, &pval) != 0) {
+		LM_ERR("failed to get header value\n");
 		return -1;
 	}
 
 	/* we need to be sure we have seen all HFs */
 	parse_headers(msg, HDR_EOH_F, 0);
+
 	for (hf=msg->headers; hf; hf=hf->next) {
-		/* for well known header names str_hf->s will be set to NULL 
-		   during parsing of opensips.cfg and str_hf->len contains 
+		/* for well known header names str_hf->s will be set to NULL
+		   during parsing of opensips.cfg and str_hf->len contains
 		   the header type */
-		if(gp->type==GPARAM_TYPE_INT)
+		if (pval.flags & PV_VAL_INT)
 		{
-			if (gp->v.ival!=hf->type)
+			if (pval.ri != hf->type)
 				continue;
 		} else {
-			if (hf->type!=HDR_OTHER_T)
+			if (hf->type != HDR_OTHER_T)
 				continue;
-			if (hf->name.len!=gp->v.sval.len)
+			if (hf->name.len != pval.rs.len)
 				continue;
-			if (strncasecmp(hf->name.s, gp->v.sval.s, hf->name.len)!=0)
+			if (strncasecmp(hf->name.s, pval.rs.s, hf->name.len) != 0)
 				continue;
 		}
-		l=del_lump(msg, hf->name.s-msg->buf, hf->len, 0);
+		/* check to see if the header was already removed */
+		if (hf_already_removed(msg, hf->name.s-msg->buf, hf->len,
+				hf->type))
+			continue;
+		l=del_lump(msg, hf->name.s-msg->buf, hf->len, hf->type);
 		if (l==0) {
 			LM_ERR("no memory\n");
 			return -1;
@@ -519,7 +532,12 @@ static int remove_hf_match_f(struct sip_msg* msg, char* pattern, char* regex_or_
 				return -1;
 			}
 			*(hf->name.s+hf->name.len) = tmp;
-			l=del_lump(msg, hf->name.s-msg->buf, hf->len, 0);
+
+			/* check to see if the header was already removed */
+			if (hf_already_removed(msg, hf->name.s-msg->buf, hf->len,
+					hf->type))
+				continue;
+			l=del_lump(msg, hf->name.s-msg->buf, hf->len, hf->type);
 			if (l==0) {
 				LM_ERR("no memory\n");
 				return -1;
@@ -533,34 +551,35 @@ static int remove_hf_match_f(struct sip_msg* msg, char* pattern, char* regex_or_
 static int is_present_hf_f(struct sip_msg* msg, char* str_hf, char* foo)
 {
 	struct hdr_field *hf;
-	gparam_p gp;
+	pv_value_t pval;
 
-	gp = (gparam_p)str_hf;
+	memset(&pval, '\0', sizeof pval);
 
-	if (gp->type == GPARAM_TYPE_PVS &&
-		parse_pvs_header(msg, gp) != 0)
-	{
-		LM_ERR("Parse pvs header failed!\n");
+	if (((gparam_p)str_hf)->type == GPARAM_TYPE_INT) {
+		pval.flags = PV_VAL_INT;
+		pval.ri = ((gparam_p)str_hf)->v.ival;
+	} else if (get_pvs_header_value(msg, (gparam_p)str_hf, &pval) != 0) {
+		LM_ERR("failed to get header value\n");
 		return -1;
 	}
 
 	/* we need to be sure we have seen all HFs */
 	parse_headers(msg, HDR_EOH_F, 0);
-	for (hf=msg->headers; hf; hf=hf->next) {
-		if(gp->type==GPARAM_TYPE_INT)
-		{
-			if (gp->v.ival!=hf->type)
-				continue;
-		} else {
-			if (hf->type!=HDR_OTHER_T)
-				continue;
-			if (hf->name.len!=gp->v.sval.len)
-				continue;
-			if (strncasecmp(hf->name.s,gp->v.sval.s,hf->name.len)!=0)
-				continue;
-		}
-		return 1;
+
+	if (pval.flags & PV_VAL_INT) {
+		for (hf=msg->headers; hf; hf=hf->next)
+			if (pval.ri == hf->type)
+				return 1;
+	} else {
+		for (hf=msg->headers; hf; hf=hf->next)
+			if (hf->type == HDR_OTHER_T &&
+				hf->name.len == pval.rs.len &&
+				strncasecmp(hf->name.s, pval.rs.s, hf->name.len) == 0)
+				return 1;
 	}
+
+	LM_DBG("header '%.*s'(%d) not found\n", pval.rs.len, pval.rs.s, pval.ri);
+
 	return -1;
 }
 
@@ -617,7 +636,7 @@ static int append_to_reply_f(struct sip_msg* msg, char* key, char* str0)
 		LM_ERR("cannot print the format\n");
 		return -1;
 	}
- 
+
 	if ( add_lump_rpl( msg, s0.s, s0.len, LUMP_RPL_HDR)==0 )
 	{
 		LM_ERR("unable to add lump_rl\n");
@@ -643,7 +662,7 @@ static int add_hf_helper(struct sip_msg* msg, str *str1, str *str2,
 		LM_ERR("error while parsing message\n");
 		return -1;
 	}
-	
+
 	hf = 0;
 	if(hfanc!=NULL) {
 		for (hf=msg->headers; hf; hf=hf->next) {
@@ -696,7 +715,7 @@ static int add_hf_helper(struct sip_msg* msg, str *str1, str *str2,
 			s0.s   = 0;
 		}
 	}
-		
+
 	len=s0.len;
 	if (str2) len+= str2->len + REQ_LINE(msg).uri.len;
 
@@ -738,7 +757,7 @@ static int insert_hf_1(struct sip_msg *msg, char *str1, char *str2 )
 
 static int insert_hf_2(struct sip_msg *msg, char *str1, char *str2 )
 {
-	return add_hf_helper(msg, 0, 0, (gparam_p)str1, 1, 
+	return add_hf_helper(msg, 0, 0, (gparam_p)str1, 1,
 			(gparam_p)str2);
 }
 
@@ -782,7 +801,7 @@ static int is_method_f(struct sip_msg *msg, char *meth, char *str2 )
  */
 static int hname_fixup(void** param, int param_no)
 {
-	char c;
+	char *c;
 	struct hdr_field hdr;
 	gparam_p gp = NULL;
 
@@ -796,32 +815,30 @@ static int hname_fixup(void** param, int param_no)
 
 	if (gp->type == GPARAM_TYPE_STR)
 	{
-		c = gp->v.sval.s[gp->v.sval.len];
-		gp->v.sval.s[gp->v.sval.len] = ':';
+		c = pkg_malloc(gp->v.sval.len + 1);
+		if (!c)
+			return E_OUT_OF_MEM;
+
+		memcpy(c, gp->v.sval.s, gp->v.sval.len);
+		c[gp->v.sval.len] = ':';
 		gp->v.sval.len++;
-		
-		if (parse_hname2(gp->v.sval.s, gp->v.sval.s
-		             + ((gp->v.sval.len<4)?4:gp->v.sval.len), &hdr)==0)
+
+		if (parse_hname2(c, c + gp->v.sval.len, &hdr) == 0)
 		{
 			LM_ERR("error parsing header name\n");
-			pkg_free(gp);
 			return E_UNSPEC;
 		}
-		
+
 		gp->v.sval.len--;
-		gp->v.sval.s[gp->v.sval.len] = c;
-	
-		if (hdr.type!=HDR_OTHER_T && hdr.type!=HDR_ERROR_T)
+		pkg_free(c);
+
+		if (hdr.type != HDR_OTHER_T && hdr.type != HDR_ERROR_T)
 		{
-			LM_INFO("using hdr type (%d) instead of <%.*s>\n",
+			LM_DBG("using hdr type (%d) instead of <%.*s>\n",
 					hdr.type, gp->v.sval.len, gp->v.sval.s);
-			pkg_free(gp->v.sval.s);
-			gp->v.sval.s = NULL;
-			gp->v.ival = hdr.type;
+
 			gp->type = GPARAM_TYPE_INT;
-		} else {
-			gp->type = GPARAM_TYPE_STR;
-			LM_INFO("using hdr type name <%.*s>\n", gp->v.sval.len, gp->v.sval.s);
+			gp->v.ival = hdr.type;
 		}
 	}
 
@@ -924,7 +941,7 @@ static int fixup_method(void** param, int param_no)
 	char *p;
 	int m;
 	unsigned int method;
-	
+
 	s = (str*)pkg_malloc(sizeof(str));
 	if (!s) {
 		LM_ERR("no pkg memory left\n");
@@ -1005,7 +1022,7 @@ static int fixup_privacy(void** param, int param_no)
 	LM_ERR("invalid privacy value\n");
 	return E_UNSPEC;
     }
-    
+
     *param = (void *)(long)val;
     return 0;
 }
@@ -1106,7 +1123,7 @@ static int has_body_f(struct sip_msg *msg, char *type, char *str2 )
 			return 1;
 		p = p->next;
 	}
-	
+
 	return -1;
 }
 
@@ -1133,9 +1150,9 @@ static int strip_body_f(struct sip_msg *msg, char *str1, char *str2 )
 		LM_DBG("message body has zero length\n");
 		return -1;
 	}
-	
+
 	/* delete all body lumps from the list */
-	/* NOTE: do not delete the SHM lumps (which are primarily stored in TM 
+	/* NOTE: do not delete the SHM lumps (which are primarily stored in TM
 	   Such lumps need to skipped and only detached  - bogdan */
 	del_notflaged_lumps( &msg->body_lumps, LUMPFLAG_SHMEM );
 	msg->body_lumps = NULL;
@@ -1161,7 +1178,7 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 	struct multi_body * m;
 	struct part * p;
 	int deleted = 0,mime;
-	
+
 
 	/* parse content len hdr */
 	if ( msg->content_length==NULL &&
@@ -1178,7 +1195,7 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 
 	if( ( ((int)(long)type )>>16) == TYPE_MULTIPART || (mime >>16) != TYPE_MULTIPART)
 	{
-		
+
 
 		if( mime == ((int)(long)type ) )
 		{
@@ -1187,7 +1204,7 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 
 		return -1;
 	}
-	
+
 
 	m = get_all_bodies(msg);
 
@@ -1218,10 +1235,10 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 				LM_ERR("Failed to add body lump\n");
 				return -1;
 			}
-			
+
 			deleted =  1;
 		}
-			
+
 		p = p->next;
 	}
 
@@ -1300,13 +1317,13 @@ static int add_body_f(struct sip_msg *msg, gparam_p nbody, gparam_p ctype )
 		pkg_free(value);
 		return -1;
 	}
-	
+
 	if(ctype) {
 		if(fixup_get_svalue(msg, ctype, &content_type)!=0) {
 			LM_ERR("cannot print the format\n");
 			return -1;
 		}
-		
+
 		if(msg->content_type) {
 			/* verify if the parameter has the same value */
 			if(content_type.len == msg->content_type->body.len &&
@@ -1322,9 +1339,9 @@ static int add_body_f(struct sip_msg *msg, gparam_p nbody, gparam_p ctype )
 			}
 		}
 		/* add new Content-Type header */
-		
+
 		/* construct header */
-		
+
 		ctype_hf.len = strlen("Content-Type: ") + content_type.len+ CRLF_LEN;
 		ctype_hf.s = (char*)pkg_malloc(ctype_hf.len);
 		if(ctype_hf.s == NULL) {
@@ -1333,7 +1350,7 @@ static int add_body_f(struct sip_msg *msg, gparam_p nbody, gparam_p ctype )
 		}
 		sprintf(ctype_hf.s, "Content-Type: %.*s%s", content_type.len,
 				content_type.s, CRLF);
-		
+
 		if( add_hf_helper(msg, &ctype_hf, 0, 0, 0, 0)< 0) {
 			LM_ERR("failed to add content type header\n");
 			pkg_free(ctype_hf.s);
@@ -1393,49 +1410,60 @@ static int fixup_sip_validate(void** param, int param_no)
 {
 	char *flags_s, *end;
 	unsigned long flags = 0;
+	pv_elem_t *pvar;
+	str s;
 
-	if (param_no != 1) {
+	if (param_no==1) {
+		if (!param) {
+			goto end;
+		}
+		flags_s = (char*)*param;
+		end = flags_s + strlen(flags_s);
+
+		for ( ; flags_s < end; flags_s++) {
+			switch (*flags_s) {
+				case 's':
+				case 'S':
+					flags |= SIP_PARSE_SDP;
+					break;
+
+				case 'h':
+				case 'H':
+					flags |= SIP_PARSE_HDR;
+					break;
+
+				case 'm':
+				case 'M':
+					flags |= SIP_PARSE_NOMF;
+					break;
+
+				case 'r':
+				case 'R':
+					flags |= SIP_PARSE_RURI;
+					break;
+
+				default:
+					LM_DBG("unknown option \'%c\'\n", *flags_s);
+					break;
+			}
+		}
+end:
+		*param = (void *)(unsigned long)flags;
+		return 0;
+	} else if (param_no==2) {
+		s.s = (char*)(*param);
+		s.len = strlen(s.s);
+		if (pv_parse_format(&s, &pvar)<0)
+		{
+			LM_ERR( "wrong format[%s]\n",(char*)(*param));
+			return E_UNSPEC;
+		}
+		*param = (void*)pvar;
+		return 0;
+	} else {
 		LM_ERR("invalid parameter number %d\n", param_no);
 		return E_UNSPEC;
 	}
-	if (!param) {
-		goto end;
-	}
-
-	flags_s = (char*)*param;
-	end = flags_s + strlen(flags_s);
-
-	for ( ; flags_s < end; flags_s++) {
-		switch (*flags_s) {
-			case 's':
-			case 'S':
-				flags |= SIP_PARSE_SDP;
-				break;
-
-			case 'h':
-			case 'H':
-				flags |= SIP_PARSE_HDR;
-				break;
-
-			case 'm':
-			case 'M':
-				flags |= SIP_PARSE_NOMF;
-				break;
-
-			case 'r':
-			case 'R':
-				flags |= SIP_PARSE_RURI;
-				break;
-
-			default:
-				LM_DBG("unknown option \'%c\'\n", *flags_s);
-				break;
-		}
-	}
-	
-end:
-	*param = (void *)(unsigned long)flags;
-	return 0;
 }
 
 static int sip_validate_hdrs(struct sip_msg *msg)
@@ -1736,35 +1764,70 @@ static int check_hostname(str *domain)
 		} \
 	} while (0)
 
+#define MAX_REASON 256
 
+enum sip_validation_failures {
+	SV_NO_MSG=-1,
+	SV_HDR_PARSE_ERROR=-2,
+	SV_NO_CALLID=-3,
+	SV_NO_CONTENT_LENGTH=-4,
+	SV_INVALID_CONTENT_LENGTH=-5,
+	SV_PARSE_SDP=-6,
+	SV_NO_CSEQ=-7,
+	SV_NO_FROM=-8,
+	SV_NO_TO=-9,
+	SV_NO_VIA1=-10,
+	SV_RURI_PARSE_ERROR=-11,
+	SV_BAD_HOSTNAME=-12,
+	SV_NO_MF=-13,
+	SV_NO_CONTACT=-14,
+	SV_PATH_NONREGISTER=-15,
+	SV_NOALLOW_405=-16,
+	SV_NOMINEXP_423=-17,
+	SV_NO_PROXY_AUTH=-18,
+	SV_NO_UNSUPPORTED=-19,
+	SV_NO_WWW_AUTH=-20,
+	SV_NO_CONTENT_TYPE=-21,
+	SV_GENERIC_FAILURE=-255
+};
 
-static int w_sip_validate(struct sip_msg *msg, char *flags_s)
+static int w_sip_validate(struct sip_msg *msg, char *flags_s, char* pv_result)
 {
 	unsigned int hdrs_len;
 	int method;
 	str body;
 	struct cseq_body * cbody;
 	unsigned long flags;
+	pv_elem_t* pv_res = (pv_elem_t*)pv_result;
+	pv_value_t pv_val;
+	char reason[MAX_REASON];
+	int ret = -SV_GENERIC_FAILURE;
 
-	if (!msg)
-		return -1;
+	if (!msg) {
+		strcpy(reason, "no message object");
+		ret = SV_NO_MSG;
+		goto failed;
+	}
 
 	/* try to check the whole SIP msg */
 	if (parse_headers(msg, HDR_EOH_F, 0) < 0) {
-		LM_DBG("message parsing failed\n");
-		return -2;
+		strcpy(reason, "message parsing failed");
+		ret = SV_HDR_PARSE_ERROR;
+		goto failed;
 	}
 
 	/* any message has to have a call-id */
 	if (!msg->callid) {
-		LM_DBG("message doesn't have callid\n");
+		strcpy(reason, "message doesn't have callid");
+		ret = SV_NO_CALLID;
 		goto failed;
 	}
 
 	/* content length should be present if protocol is not UDP */
 	if (msg->rcv.proto != PROTO_UDP && !msg->content_length) {
-		LM_DBG("message doesn't have Content Length header for proto %d\n",
-				msg->rcv.proto);
+		snprintf(reason, MAX_REASON-1, "message doesn't have Content Length header for proto %d",
+			msg->rcv.proto);
+		ret = SV_NO_CONTENT_LENGTH;
 		goto failed;
 	}
 
@@ -1776,8 +1839,9 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 	/* if not CANCEL, check if it has body */
 	if (msg->first_line.type!=SIP_REQUEST || msg->REQ_METHOD!=METHOD_CANCEL) {
 		if (!msg->unparsed) {
-			LM_DBG("Invalid parsing \n");
-			return -2;
+			strcpy(reason, "invalid parsing");
+			ret = SV_HDR_PARSE_ERROR;
+			goto failed;
 		}
 		hdrs_len=(unsigned int)(msg->unparsed-msg->buf);
 
@@ -1797,8 +1861,9 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 			body.len = msg->buf + msg->len - body.s;
 
 		if (get_content_length(msg) != body.len) {
-			LM_DBG("invalid body - content length %ld different then actual body %d\n",
-					get_content_length(msg), body.len);
+			snprintf(reason, MAX_REASON-1, "invalid body - content length %ld different then actual body %d",
+				get_content_length(msg), body.len);
+			ret = SV_INVALID_CONTENT_LENGTH;
 			goto failed;
 		}
 
@@ -1806,22 +1871,31 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 		if (body.s && body.len && (flags & SIP_PARSE_SDP) &&
 		parse_content_type_hdr(msg)==(TYPE_APPLICATION<<16 | SUBTYPE_SDP) ) {
 			if (parse_sdp(msg) < 0) {
-				LM_DBG("failed to parse SDP message\n");
-				return -3;
+				strcpy(reason, "failed to parse SDP message");
+				ret = SV_PARSE_SDP;
+				goto failed;
 			}
 		}
 	}
 
+	/* set reason to empty (covers cases where we
+	 * exit via CHECK_HEADER) */
+	reason[0] = 0;
+
 	/* Cseq */
+	ret = SV_NO_CSEQ;
 	CHECK_HEADER("", cseq);
 
 	/* From */
+	ret = SV_NO_FROM;
 	CHECK_HEADER("", from);
 
 	/* To */
+	ret = SV_NO_TO;
 	CHECK_HEADER("", to);
 
 	/* check only if Via1 is present */
+	ret = SV_NO_VIA1;
 	CHECK_HEADER("", via1);
 
 	/* request or reply */
@@ -1831,24 +1905,30 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 			/* check R-URI */
 			if (flags & SIP_PARSE_RURI) {
 				if(msg->parsed_uri_ok==0 && parse_sip_msg_uri(msg) < 0) {
-					LM_DBG("failed to parse R-URI\n");
-					return -5;
+					strcpy(reason, "failed to parse R-URI");
+					ret = SV_RURI_PARSE_ERROR;
+					goto failed;
 				}
 				if (check_hostname(&msg->parsed_uri.host) < 0) {
-					LM_DBG("invalid domain\n");
-					return -6;
+					strcpy(reason, "invalid domain");
+					ret = SV_BAD_HOSTNAME;
+					goto failed;
 				}
 			}
 			/* Max-Forwards */
-			if (!(flags & SIP_PARSE_NOMF))
+			if (!(flags & SIP_PARSE_NOMF)) {
+				ret = SV_NO_MF;
 				CHECK_HEADER("", maxforwards);
+			}
 
 			if (msg->REQ_METHOD == METHOD_INVITE) {
+				ret = SV_NO_CONTACT;
 				CHECK_HEADER("INVITE", contact);
 			}
 
 			if (msg->REQ_METHOD != METHOD_REGISTER && msg->path) {
-				LM_DBG("PATH header supported only for REGISTERs\n");
+				strcpy(reason, "PATH header supported only for REGISTERs");
+				ret = SV_PATH_NONREGISTER;
 				goto failed;
 			}
 
@@ -1860,30 +1940,37 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 			/* checking the reply's message type */
 			cbody = (struct cseq_body *)msg->cseq->parsed;
 			if (!cbody) {
-				LM_DBG("Cseq not parsed properly\n");
+				strcpy(reason, "cseq not parsed properly");
+				ret = SV_NO_CSEQ;
 				goto failed;
 			}
 			method = cbody->method_id;
 			if (method != METHOD_CANCEL) {
 				switch (msg->first_line.u.reply.statuscode) {
 				case 405:
+					ret = SV_NOALLOW_405;
 					CHECK_HEADER("", allow);
 					break;
 
 				case 423:
-					if (method == METHOD_REGISTER)
+					if (method == METHOD_REGISTER) {
+						ret = SV_NOMINEXP_423;
 						CHECK_HEADER("REGISTER", min_expires);
+					}
 					break;
 
 				case 407:
+					ret = SV_NO_PROXY_AUTH;
 					CHECK_HEADER("", proxy_authenticate);
 					break;
 
 				case 420:
+					ret = SV_NO_UNSUPPORTED;
 					CHECK_HEADER("", unsupported);
 					break;
 
 				case 401:
+					ret = SV_NO_WWW_AUTH;
 					CHECK_HEADER("", www_authenticate);
 					break;
 				}
@@ -1892,14 +1979,16 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 			break;
 
 		default:
-			LM_DBG("invalid message type\n");
-			return -255;
+			strcpy(reason, "invalid message type");
+			ret = SV_GENERIC_FAILURE;
+			goto failed;
 	}
 	/* check for body */
 	if (method != METHOD_CANCEL) {
 		if (!msg->unparsed) {
-			LM_DBG("Invalid parsing \n");
-			return -2;
+			strcpy(reason, "invalid parsing");
+			ret = SV_HDR_PARSE_ERROR;
+			goto failed;
 		}
 		hdrs_len=(unsigned int)(msg->unparsed-msg->buf);
 
@@ -1918,26 +2007,41 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s)
 		body.len = msg->buf + msg->len - body.s;
 
 		if (get_content_length(msg) != body.len) {
-			LM_DBG("invalid body - content length %ld different then "
-					"actual body %d\n", get_content_length(msg), body.len);
+			snprintf(reason, MAX_REASON-1, "invalid body - content length %ld different then "
+				"actual body %d\n", get_content_length(msg), body.len);
+			ret = SV_INVALID_CONTENT_LENGTH;
 			goto failed;
 		}
 
 		if (body.len && body.s) {
 			/* if it really has body, check for content type */
+			ret = SV_NO_CONTENT_TYPE;
 			CHECK_HEADER("", content_type);
 		}
 	}
 
 	if ((flags & SIP_PARSE_HDR) && sip_validate_hdrs(msg) < 0) {
-		LM_DBG("failed to parse headers\n");
-		return -4;
+		strcpy(reason, "failed to parse headers");
+		ret = SV_HDR_PARSE_ERROR;
+		goto failed;
 	}
 
 	return 1;
 failed:
-	LM_DBG("message does not comply with SIP RFC3261\n");
-	return -1;
+	LM_DBG("message does not comply with SIP RFC3261 : (%s)\n", reason);
+
+	if (pv_result != NULL)
+	{
+		pv_val.rs.len = strlen(reason);
+		pv_val.rs.s = reason;
+		pv_val.flags = PV_VAL_STR;
+		if (pv_set_value(msg, &pv_res->spec, 0, &pv_val) != 0)
+		{
+			LM_ERR("cannot populate parameter\n");
+			return SV_GENERIC_FAILURE;
+		}
+	}
+	return ret;
 }
 
 #undef CHECK_HEADER

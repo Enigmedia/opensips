@@ -21,8 +21,7 @@ Sergio Gutierrez
    Copyright © 2007, 2008 1und1 Internet AG, BASIS AudioNet GmbH,
    Elena-Ramona Modroiu
    Revision History
-   Revision $Revision$ $Date: 2009-07-21 10:45:05 +0300
-                              (Tue, 21 Jul 2009) $
+   Revision $Revision: 5901 $ $Date$
      __________________________________________________________
 
    Table of Contents
@@ -425,8 +424,11 @@ ts_usec_delta("$avp(10)", "$avp(20)", "10", "300", "$avp(result)");
 1.4.13.  check_time_rec(time_string)
 
    The function returns a positive value if the specified time
-   reccurence string matches the current time, or a negative value
+   recurrence string matches the current time, or a negative value
    otherwise.
+
+   The syntax of each field is identical to the corresponding
+   field from RFC 2445.
 
    This function can be used from REQUEST_ROUTE, ONREPLY_ROUTE,
    FAILURE_ROUTE, BRANCH_ROUTE, LOCAL_ROUTE, STARTUP_ROUTE,

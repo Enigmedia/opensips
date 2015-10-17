@@ -1574,6 +1574,8 @@ ClientNatTest(struct sip_msg *msg, unsigned int tests)
 static void
 send_keepalive(NAT_Contact *contact)
 {
+#define MAX_BRANCHID 9999999
+#define MIN_BRANCHID 1000000
     char buffer[8192], *from_uri, *ptr;
     static char from[64] = FROM_PREFIX;
     static char *from_ip = from + sizeof(FROM_PREFIX) - 1;
@@ -1596,7 +1598,7 @@ send_keepalive(NAT_Contact *contact)
 
     len = snprintf(buffer, sizeof(buffer),
                    "%s %s SIP/2.0\r\n"
-                   "Via: SIP/2.0/UDP %.*s:%d;branch=0\r\n"
+                   "Via: SIP/2.0/UDP %.*s:%d;branch=z9hG4bK%ld\r\n"
                    "From: %s;tag=%x\r\n"
                    "To: %s\r\n"
                    "Call-ID: %s-%x-%x@%.*s\r\n"
@@ -1606,6 +1608,7 @@ send_keepalive(NAT_Contact *contact)
                    keepalive_params.method, contact->uri,
                    contact->socket->address_str.len,
                    contact->socket->address_str.s, contact->socket->port_no,
+                   (long)(rand()/(float)RAND_MAX * (MAX_BRANCHID-MIN_BRANCHID) + MIN_BRANCHID),
                    from_uri, keepalive_params.from_tag++,
                    contact->uri, keepalive_params.callid_prefix,
                    keepalive_params.callid_counter++, get_ticks(),
@@ -1907,16 +1910,16 @@ preprocess_request(struct sip_msg *msg, void *_param)
     str totag;
 
     if (msg->REQ_METHOD != METHOD_INVITE)
-        return 1;
+        return SCB_RUN_ALL;
 
     if (parse_headers(msg, HDR_TO_F, 0) == -1) {
         LM_ERR("failed to parse To header\n");
-        return -1;
+        return SCB_RUN_ALL;
     }
 
     if (!msg->to) {
         LM_ERR("missing To header\n");
-        return -1;
+        return SCB_RUN_ALL;
     }
 
     totag = get_to(msg)->tag_value;
@@ -1924,7 +1927,7 @@ preprocess_request(struct sip_msg *msg, void *_param)
         msg->msg_flags |= FL_NAT_TRACK_DIALOG;
     }
 
-    return 1;
+	return SCB_RUN_ALL;
 }
 
 

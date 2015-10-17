@@ -28,6 +28,7 @@
 
 
 #include "http_dbase.h"
+#include "db_http.h"
 #include "../../db/db_id.h"
 #include "../../db/db_ut.h"
 #include "../../db/db_row.h"
@@ -73,7 +74,7 @@ int next_state[3][256];
 
 char line_delim = '\n';
 char col_delim = ';';
-char *col_delim_s = ";";
+char *val_delim_s = ",";
 char quote_delim = '|';
 
 extern int use_ssl;
@@ -85,7 +86,7 @@ char error_buffer[CURL_ERROR_SIZE];
 {						\
 	if( (val) != (expected) )		\
 		goto err_tag;			\
-}	
+}
 
 
 
@@ -100,7 +101,6 @@ int set_col_delim( unsigned int type, void *val)
 		return -1;
 	}
 	col_delim = v[0];
-	col_delim_s = val;
 
 	return 0;
 }
@@ -133,6 +133,18 @@ int set_quote_delim( unsigned int type, void *val)
 	return 0;
 }
 
+
+int set_value_delim( unsigned int type, void *val)
+{
+	if( strlen(val) != 1)
+	{
+		LM_ERR("Only one values delimiter may be set\n");
+		return -1;
+	}
+	val_delim_s = val;
+
+	return 0;
+}
 
 
 
@@ -187,13 +199,13 @@ static int append_keys (var_str * q,const char * name, const db_key_t* k,
 
 		CHECK(append_const(q,(char*)name),0,error);
 		CHECK(append_const(q,"="),0,error);
-		
+
 		for(i=0;i<n;i++)
 		{
 
 			CHECK(append_str(q,url_encode(*k[i])),0,error);
 			if( i < n-1)
-				CHECK(append_const(q,col_delim_s),0,error);
+				CHECK(append_const(q,val_delim_s),0,error);
 		}
 		*started = 1;
 	}
@@ -207,7 +219,7 @@ error:
 
 static int append_values (var_str * q,const char * name, const db_val_t* v,
 		int n, int * started )
-{	
+{
 	int i;
 
 	if( v != NULL)
@@ -222,7 +234,7 @@ static int append_values (var_str * q,const char * name, const db_val_t* v,
 		{
 			CHECK(append_str(q,url_encode(value_to_string(&v[i]))),0,error);
 			if( i < n-1)
-				CHECK(append_const(q,col_delim_s),0,error);
+				CHECK(append_const(q,val_delim_s),0,error);
 		}
 
 		*started = 1;
@@ -239,7 +251,7 @@ static int append_ops(var_str * q,const char * name, const db_op_t* op,
 		int n, int * started )
 {
 	int i;
-	
+
 	if( op != NULL)
 	{
 		if( *started )
@@ -261,7 +273,7 @@ static int append_ops(var_str * q,const char * name, const db_op_t* op,
 
 
 			if( i < n-1)
-				CHECK(append_const(q,col_delim_s),0,error);
+				CHECK(append_const(q,val_delim_s),0,error);
 		}
 		*started = 1;
 	}
@@ -328,7 +340,7 @@ db_res_t * new_full_db_res(int rows, int cols)
 	res->res_rows = rows;
 	res->last_row = rows;
 
-	
+
 	for( i=0;i<rows;i++)
 		res->rows[i].n = cols;
 
@@ -363,7 +375,7 @@ int put_type_in_result( char * start, int len , db_res_t * res , int cur_col )
 		res->col.types[cur_col] = DB_STRING;
 		ok = 1;
 	}
-	
+
 	if( len == 3 && !strncmp (start,"str",len))
 	{
 		res->col.types[cur_col] = DB_STR;
@@ -383,9 +395,9 @@ int put_type_in_result( char * start, int len , db_res_t * res , int cur_col )
 
 	if( !ok )
 		LM_ERR("Unknown datatype\n");
-	
+
 	return 1 - ok;
-	
+
 }
 
 int put_value_in_result(  char * start, int len , db_res_t * res ,
@@ -400,7 +412,7 @@ int put_value_in_result(  char * start, int len , db_res_t * res ,
 	row = res->rows[cur_line].values;
 	row[cur_col].type = res->col.types[cur_col];
 
-	
+
 	if( len == 0 && (res->col.types[cur_col] != DB_BLOB )
 		&& (res->col.types[cur_col] != DB_STRING )
 		&& (res->col.types[cur_col] != DB_STR )
@@ -409,7 +421,7 @@ int put_value_in_result(  char * start, int len , db_res_t * res ,
 		row[cur_col].nul = 1;
 		return 0;
 	}
-	
+
 	switch(res->col.types[cur_col])
 	{
 		case( DB_INT):
@@ -455,9 +467,9 @@ int form_result(var_str buff, db_res_t** r)
 	db_res_t * res;
 	char * cur, * dest, * start, * end;
 	int col_count, cur_col, line_count, cur_line, delim_count, len;
-	int state, next, first_line, consume;
+	int state, next, consume;
 
-	
+
 	LM_DBG("Called with : %.*s\n",buff.len,buff.s);
 
 
@@ -528,7 +540,7 @@ int form_result(var_str buff, db_res_t** r)
 
 	line_count = cur_line;
 
-	
+
 	if( col_count == 0 || line_count == 0 )
 		goto error_before;
 
@@ -540,7 +552,7 @@ int form_result(var_str buff, db_res_t** r)
 		goto error_before;
 
 
-	
+
 
 
 	/* allocate all necessary info */
@@ -549,7 +561,7 @@ int form_result(var_str buff, db_res_t** r)
 
 	if( res == NULL )
 		return -1;
-	
+
 
 
 	state = OUT;
@@ -558,12 +570,11 @@ int form_result(var_str buff, db_res_t** r)
 
 	cur_col = 0;
 	cur_line = -1;
-	first_line = 1;
 	start = dest;
 
 	while( cur < end )
 	{
-		
+
 
 		next = next_state[ state ][ (int)((unsigned char)*cur) ];
 		consume =  1;
@@ -578,7 +589,7 @@ int form_result(var_str buff, db_res_t** r)
 				if( cur_line == -1 )
 					CHECK( put_type_in_result(start,len,
 						res,cur_col), 0, error)
-				
+
 				else
 					CHECK( put_value_in_result(start,len,
 						res,cur_col,cur_line),0,error)
@@ -587,7 +598,7 @@ int form_result(var_str buff, db_res_t** r)
 				start = dest;
 				cur_col++;
 
-				
+
 			}
 			else
 			if( *cur == line_delim )
@@ -606,7 +617,7 @@ int form_result(var_str buff, db_res_t** r)
 
 				cur_line++;
 				cur_col = 0;
-			
+
 			}
 			else
 			if( *cur != quote_delim )
@@ -624,7 +635,7 @@ int form_result(var_str buff, db_res_t** r)
 				consume = 0;
 			else
 				*dest++ = *cur;
-			
+
 		}
 
 		if( state == IN )
@@ -643,7 +654,7 @@ int form_result(var_str buff, db_res_t** r)
 
 
 
-	
+
 
 	LM_DBG("Finished query\n");
 
@@ -659,7 +670,7 @@ error_before:
 	LM_ERR("Error parsing HTTP reply\n");
 	return -1;
 
-	
+
 }
 
 int do_http_op (  const db_con_t* h, const db_key_t* k, const db_op_t* op,
@@ -780,17 +791,17 @@ int do_http_op (  const db_con_t* h, const db_key_t* k, const db_op_t* op,
 
 	}
 
-	
+
 	q.s[q.len] = 0 ;
 
-	
+
 
 	LM_DBG("Sent:%s \n",q.s);
 
 	curl_easy_setopt(conn->handle, CURLOPT_HTTPGET, 1);
 	curl_easy_setopt(conn->handle, CURLOPT_URL, q.s);
 
-	
+
 	curl_easy_setopt(conn->handle, CURLOPT_WRITEFUNCTION, receive);
 	curl_easy_setopt(conn->handle, CURLOPT_WRITEDATA, &buff);
 
@@ -825,7 +836,7 @@ int do_http_op (  const db_con_t* h, const db_key_t* k, const db_op_t* op,
 			sscanf(buff.s,"%d",&conn->last_id);
 	}
 
-	
+
 
 	return 0;
 
@@ -850,7 +861,7 @@ str value_to_string(const db_val_t * v)
 		rez.len = 1;
 		return rez;
 	}
-	
+
 
 
 	switch ( v->type)
@@ -897,7 +908,7 @@ str value_to_string(const db_val_t * v)
 		rez.s = "";
 		rez.len = 0;
 	}
-	
+
 
 	return rez;
 }
@@ -916,7 +927,7 @@ char to_hex(char code)
 str url_encode(str s)
 {
 
-	
+
 	static char *buf = NULL;
 	static int size = 0;
 
@@ -931,10 +942,10 @@ str url_encode(str s)
 		buf = pkg_realloc(buf, s.len * 3 + 1);
 		size = s.len * 3 + 1;
 	}
-	
+
 	pbuf = buf;
 	i = 0;
-	
+
 	while ( i < s.len )
 	{
 		if (isalnum(*pstr) || *pstr == '-' ||
@@ -947,7 +958,7 @@ str url_encode(str s)
 			*pbuf++ = to_hex(*pstr >> 4);
 			*pbuf++ = to_hex(*pstr & 15);
 		}
-		
+
 		pstr++;
 		i++;
 	}
@@ -965,7 +976,7 @@ str url_encode(str s)
 db_con_t* db_http_init(const str* url)
 {
 
-	
+
 	char* path;
 	char port [20];
 	char user_pass[1024];
@@ -997,8 +1008,8 @@ db_con_t* db_http_init(const str* url)
 	}
 
 	memset(path,0,1024);
-	
-	
+
+
 	id = new_db_id( &tmp );
 
 	if( id == NULL)
@@ -1006,7 +1017,7 @@ db_con_t* db_http_init(const str* url)
 		LM_ERR("Incorrect db_url\n");
 		return NULL;
 	}
-	
+
 
 
 	if( id->username && id->password)
@@ -1016,7 +1027,7 @@ db_con_t* db_http_init(const str* url)
 		strcat(user_pass,id->password);
 	}
 
-	
+
 
 	curl = (http_conn_t * ) pkg_malloc(sizeof(http_conn_t));
 
@@ -1034,13 +1045,16 @@ db_con_t* db_http_init(const str* url)
 	curl_easy_setopt(curl->handle,CURLOPT_HTTPAUTH,CURLAUTH_ANY);
 
 	curl_easy_setopt(curl->handle,CURLOPT_ERRORBUFFER,error_buffer);
-
+#if LIBCURL_VERSION_NUM >= 0x071002
+	LM_DBG("timeout set to %d", db_http_timeout);
+	curl_easy_setopt(curl->handle,CURLOPT_TIMEOUT_MS,db_http_timeout);
+#endif
 
 	strcat(path,"http");
 	if ( use_ssl )
 		strcat(path,"s");
 	strcat(path,"://");
-	
+
 
 	strcat(path,id->host);
 	if( id->port )
@@ -1087,7 +1101,7 @@ db_con_t* db_http_init(const str* url)
 	next_state[ ESC ][ (int) quote_delim ] = IN;
 
 	return ans;
-	
+
 }
 
 
@@ -1177,7 +1191,7 @@ int db_http_insert(const db_con_t* _h, const db_key_t* _k,
 		NULL,
 		HTTPDB_INSERT
 		);
-	
+
 }
 
 
@@ -1198,7 +1212,7 @@ int db_http_delete(const db_con_t* _h, const db_key_t* _k, const
 		NULL,
 		HTTPDB_DELETE
 		);
-	     
+
 }
 
 
@@ -1219,7 +1233,7 @@ int db_http_update(const db_con_t* _h, const db_key_t* _k, const db_op_t* _o,
 		NULL,
 		HTTPDB_UPDATE
 		);
-	
+
 }
 
 
@@ -1250,7 +1264,7 @@ int db_last_inserted_id(const db_con_t* _h)
 
 
 	return conn->last_id;
-	
+
 }
 
 /*
@@ -1270,7 +1284,7 @@ int db_insert_update(const db_con_t* _h, const db_key_t* _k, const db_val_t* _v,
 		HTTPDB_INSERT_UPDATE
 		);
 
-	
+
 }
 
 

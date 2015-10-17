@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -35,7 +35,8 @@
 #include "dlg_vals.h"
 #include "../../sr_module.h"
 
-typedef struct dlg_cell *(*get_dlg_f)( void );
+typedef struct dlg_cell *(*get_dlg_f) (void);
+typedef int (*match_dialog_f) (struct sip_msg *);
 
 struct dlg_binds {
 	register_dlgcb_f     register_dlgcb;
@@ -44,11 +45,15 @@ struct dlg_binds {
 	add_profiles_f       add_profiles;
 	search_dlg_profile_f search_profile;
 	set_dlg_profile_f    set_profile;
-	set_dlg_profile_f    unset_profile;
+	unset_dlg_profile_f  unset_profile;
 	get_profile_size_f   get_profile_size;
 	store_dlg_value_f    store_dlg_value;
 	fetch_dlg_value_f    fetch_dlg_value;
 	terminate_dlg_f      terminate_dlg;
+
+	match_dialog_f       match_dialog;
+	validate_dialog_f    validate_dialog;
+	fix_route_dialog_f   fix_route_dialog;
 };
 
 

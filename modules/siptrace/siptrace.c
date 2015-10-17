@@ -44,6 +44,7 @@
 #include "../dialog/dlg_load.h"
 #include "../sl/sl_cb.h"
 #include "../../str.h"
+#include "../../script_cb.h"
 
 #include "../sipcapture/sipcapture.h"
 
@@ -100,6 +101,10 @@ static struct mi_root* trace_to_database_mi(struct mi_root* cmd, void* param );
 static int trace_send_hep_duplicate(str *body, str *fromip, str *toip);
 static int pipport2su (str *pipport, union sockaddr_union *tmp_su, unsigned int *proto);
 
+static int do_dlg_siptrace = 0;
+static void siptrace_dlg_created(struct dlg_cell *did, int type,struct dlg_cb_params * params);
+static int siptrace_cleanup( struct sip_msg *msg, void *param );
+static void siptrace_dlg_cancel(struct cell* t, int type, struct tmcb_params *param);
 
 static str db_url             = {NULL, 0};
 static str siptrace_table     = str_init("sip_trace");
@@ -113,6 +118,8 @@ static str fromip_column      = str_init("fromip");      /* 06 */
 static str toip_column        = str_init("toip");        /* 07 */
 static str fromtag_column     = str_init("fromtag");     /* 08 */
 static str direction_column   = str_init("direction");   /* 09 */
+
+static str st_flag_val = str_init("_st_XX_flag_43");
 
 static char *trace_flag_str = 0;
 int trace_flag = -1;
@@ -241,6 +248,16 @@ static int fixup_trace_dialog(void** param, int param_no)
 		return -1;
 	}
 
+	if (dlgb.register_dlgcb(NULL, DLGCB_CREATED, siptrace_dlg_created, NULL, NULL) < 0) {
+		LM_ERR("Failed to register dialog created callback \n");
+		return -1;
+	}
+
+	if (register_script_cb( siptrace_cleanup, POST_SCRIPT_CB|REQ_TYPE_CB,0)<0) {
+		LM_ERR("Failed to register postcript cleanup cb\n");
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -273,7 +290,7 @@ static int mod_init(void)
 
 	LM_INFO("initializing...\n");
 
-	fix_flag_name(&trace_flag_str, trace_flag);
+	fix_flag_name(trace_flag_str, trace_flag);
 
 	trace_flag = get_flag_id_by_name(FLAG_TYPE_MSG, trace_flag_str);
 
@@ -605,7 +622,7 @@ static str* generate_val_name(unsigned char n)
 
 
 static void trace_transaction(struct dlg_cell* dlg, int type,
-												struct dlg_cb_params * params)
+		struct dlg_cb_params * params)
 {
 	unsigned char n;
 	static int_str avp_value;
@@ -625,7 +642,8 @@ static void trace_transaction(struct dlg_cell* dlg, int type,
 	}while(1);
 
 	/* set the flag */
-	params->msg->flags |= trace_flag;
+	if ( dlgb.fetch_dlg_value( dlg, &st_flag_val, &avp_value.s, 0)==0 )
+		params->msg->flags |= trace_flag;
 	params->msg->msg_flags |= FL_USE_SIPTRACE;
 	/* trace current request */
 	sip_trace(params->msg);
@@ -673,6 +691,14 @@ static int trace_dialog(struct sip_msg *msg)
 		return -1;
 	}
 
+	/* any need to do tracing here ? check the triggers */
+	avp = traced_user_avp<0 ? NULL : search_first_avp(traced_user_avp_type,
+			traced_user_avp, &avp_value, 0);
+	if (avp==NULL && (msg->flags&trace_flag)==0) {
+		LM_DBG("Nothing to trace here\n");
+		return -1;
+	}
+
 	if (dlgb.create_dlg(msg,0)<1) {
 		LM_ERR("failed to create dialog\n");
 		return -1;
@@ -694,8 +720,6 @@ static int trace_dialog(struct sip_msg *msg)
 	 them for each transactin from the dialog */
 	if(traced_user_avp>=0) {
 		n = 0;
-		avp=search_first_avp(traced_user_avp_type, traced_user_avp,
-				&avp_value, 0);
 		while(avp!=NULL) {
 			/* generate a name */
 			name = generate_val_name(n);
@@ -711,14 +735,60 @@ static int trace_dialog(struct sip_msg *msg)
 	}
 
 	/* set the flag to trace the rest of the transaction */
-	msg->flags |= trace_flag;
+	if (msg->flags&trace_flag) {
+		avp_value.s.s = "1";
+		avp_value.s.len = 1;
+		dlgb.store_dlg_value( dlg, &st_flag_val, &avp_value.s);
+	}
 
 	/* trace current request */
 	sip_trace(msg);
 
+	do_dlg_siptrace=1;
 	return 1;
 }
 
+static int siptrace_cleanup( struct sip_msg *msg, void *param )
+{
+	do_dlg_siptrace=0;
+
+	return SCB_DROP_MSG;
+}
+
+static void siptrace_dlg_created(struct dlg_cell *did, int type,
+		struct dlg_cb_params * params)
+{
+	struct sip_msg *req;
+	struct cell *t;
+
+	if (do_dlg_siptrace == 1) {
+		req = params->msg;
+		t = tmb.t_gett();
+
+		// we also want to catch the incoming cancel
+		if ( tmb.register_tmcb( req, t,TMCB_TRANS_CANCELLED,
+					siptrace_dlg_cancel, NULL, NULL)<0 ) {
+			LM_ERR("failed to register trans cancelled TMCB\n");
+			return;
+		}
+	}
+}
+
+static void siptrace_dlg_cancel(struct cell* t, int type, struct tmcb_params *param)
+{
+	int_str avp_value;
+	struct sip_msg *req;
+	req = param->req;
+
+	LM_DBG("Tracing incoming cancel due to trace_dialog() \n");
+
+	/* set the flag */
+	if ( dlgb.fetch_dlg_value( (struct dlg_cell*)t->dialog_ctx, &st_flag_val, &avp_value.s, 0)==0 )
+		req->flags |= trace_flag;
+	req->msg_flags |= FL_USE_SIPTRACE;
+	/* trace current request */
+	sip_trace(req);
+}
 
 static inline int siptrace_copy_proto(int proto, char *buf)
 {
@@ -1806,6 +1876,7 @@ static int pipport2su (str *pipport, union sockaddr_union *tmp_su,
 	/*the address contains a port number*/
 	port_str.s = p + 1;
 	port_str.len = pipport->len+pipport->s - port_str.s;
+	LM_DBG("the port string is %.*s\n", port_str.len, port_str.s);
 	if(str2int(&port_str, &port_no) != 0 ) {
 		LM_ERR("there is not a valid number port\n");
 		return -1;

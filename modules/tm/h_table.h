@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -30,7 +30,7 @@
  * 2004-02-13  t->is_invite, t->local, t->noisy_ctimer replaced
  *             with flags (bogdan)
  * 2004-08-23  avp support added - avp list linked in transaction (bogdan)
- * 2007-01-25  DNS failover at transaction level added (bogdan) 
+ * 2007-01-25  DNS failover at transaction level added (bogdan)
  */
 
 #ifndef _H_TABLE_H
@@ -99,7 +99,7 @@ typedef struct retr_buf
 	0 if request or -1 if local CANCEL */
 
 	str buffer;
-	
+
 	struct dest_info dst;
 
 	/* a message can be linked just to retransmission and FR list */
@@ -122,7 +122,7 @@ typedef struct ua_server
 	char             *end_request;
 	struct retr_buf  response;
 	unsigned int     status;
-	/* keep to-tags for local 200 replies for INVITE -- 
+	/* keep to-tags for local 200 replies for INVITE --
 	 * we need them for dialog-wise matching of ACKs;
 	 * the pointer shows to shmem-ed reply */
 	str              local_totag;
@@ -137,7 +137,7 @@ typedef struct ua_client
 	struct retr_buf  request;
 	struct proxy_l   *proxy;
 	/* we maintain a separate copy of cancel rather than
-	   reuse the structure for original request; the 
+	   reuse the structure for original request; the
 	   original request is no longer needed but its delayed
 	   timer may fire and interfere with whoever tries to
 	   rewrite it */
@@ -228,7 +228,7 @@ typedef struct cell
 	   when entering WAIT state and the wait timer is the only place
 	   from which a transaction can be deleted (if ref_count==0); good
 	   for protecting from conditions in which wait_timer hits and
-	   tries to delete a transaction whereas at the same time 
+	   tries to delete a transaction whereas at the same time
 	   a delayed message belonging to the transaction is received */
 	volatile unsigned int ref_count;
 
@@ -273,6 +273,9 @@ typedef struct cell
 	/* the branch_route to be processed separately for each branch */
 	unsigned int on_branch;
 
+	int fr_timeout;     /* final reply timeout (sec) */
+	int fr_inv_timeout; /* final reply timeout for an INVITE, after 1XX (sec) */
+
 	/* MD5checksum  (meaningful only if syn_branch=0) */
 	char md5[MD5_LEN];
 
@@ -281,8 +284,8 @@ typedef struct cell
 	short damocles;
 #endif
 
-	/* to-tags of 200/INVITEs which were received from downstream and 
-	 * forwarded or passed to UAC; note that there can be arbitrarily 
+	/* to-tags of 200/INVITEs which were received from downstream and
+	 * forwarded or passed to UAC; note that there can be arbitrarily
 	 * many due to downstream forking; */
 	struct totag_elem *fwded_totags;
 
@@ -318,6 +321,9 @@ struct s_table
 {
 	/* table of hash entries; each of them is a list of synonyms  */
 	struct entry   entrys[ TM_TABLE_ENTRIES ];
+	/* we keep it here just as a shortcut, we need it for assigning
+	 * a transaction to a specific timer set */
+	unsigned short timer_sets;
 };
 
 
@@ -353,15 +359,18 @@ struct s_table
 
 
 extern int syn_branch;
+extern int fr_timeout;
+extern int fr_inv_timeout;
+extern int tm_timer_shift;
 
 
 void reset_kr();
 void set_kr( enum kill_reason kr );
 enum kill_reason get_kr();
 
-struct s_table* get_tm_table();
-struct s_table* init_hash_table();
-void   free_hash_table( );
+struct s_table* get_tm_table( void );
+struct s_table* init_hash_table(unsigned int timer_sets);
+void   free_hash_table( void );
 void   free_cell( struct cell* dead_cell );
 struct cell*  build_cell( struct sip_msg* p_msg );
 void   remove_from_hash_table_unsafe( struct cell * p_cell);
@@ -374,7 +383,7 @@ unsigned int transaction_count( void );
 
 /* Unix socket variant */
 int unixsock_hash(str* msg);
-		    
+
 #endif
 
 

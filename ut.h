@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
@@ -79,6 +79,13 @@ struct sip_msg;
 #define trim_spaces_lr(_s_) \
 	do{\
 		for(;(_s_).s[(_s_).len-1]==' ';(_s_).s[--(_s_).len]=0);\
+		for(;(_s_).s[0]==' ';(_s_).s=(_s_).s+1,(_s_).len--);\
+	}while(0);
+
+/* right and left space trimming without '0' padding */
+#define str_trim_spaces_lr(_s_) \
+	do{\
+		for(;(_s_).s[(_s_).len-1]==' ';--(_s_).len);\
 		for(;(_s_).s[0]==' ';(_s_).s=(_s_).s+1,(_s_).len--);\
 	}while(0);
 
@@ -155,7 +162,7 @@ static inline int btostr( char *p,  unsigned char val)
 /* 2^64~= 16*10^18 => 19+1+1 sign + digits + \0 */
 #define INT2STR_MAX_LEN  (1+19+1+1)
 
-/* INTeger-TO-Buffer-STRing : convers an unsigned long to a string 
+/* INTeger-TO-Buffer-STRing : convers an unsigned long to a string
  * IMPORTANT: the provided buffer must be at least INT2STR_MAX_LEN size !! */
 static inline char* int2bstr(unsigned long l, char *s, int* len)
 {
@@ -176,7 +183,7 @@ static inline char* int2bstr(unsigned long l, char *s, int* len)
 }
 
 
-/* INTeger-TO-STRing : convers an unsigned long to a string 
+/* INTeger-TO-STRing : convers an unsigned long to a string
  * returns a pointer to a static buffer containing l in asciiz & sets len */
 extern char int2str_buf[INT2STR_MAX_LEN];
 static inline char* int2str(unsigned long l, int* len)
@@ -215,9 +222,22 @@ static inline char* q_memchr(char* p, int c, unsigned int size)
 	for(;p<end;p++){
 		if (*p==(unsigned char)c) return p;
 	}
-	return 0;
+	return NULL;
 }
-	
+
+
+/* faster memrchr version */
+static inline char* q_memrchr(char* p, int c, unsigned int size)
+{
+	char* cursor;
+
+	cursor=p+size-1;
+	for(;cursor>=p;cursor--){
+		if (*cursor==(unsigned char)c) return cursor;
+	}
+	return NULL;
+}
+
 
 inline static int reverse_hex2int( char *c, int len )
 {
@@ -237,7 +257,7 @@ inline static int reverse_hex2int( char *c, int len )
 	return r;
 }
 
-inline static int int2reverse_hex( char **c, int *size, int nr )
+inline static int int2reverse_hex( char **c, int *size, unsigned int nr )
 {
 	unsigned short digit;
 
@@ -279,7 +299,7 @@ inline static int hexstr2int(char *c, int len, unsigned int *val)
 
 
 /* double output length assumed ; does NOT zero-terminate */
-inline static int string2hex( 
+inline static int string2hex(
 	/* input */ unsigned char *str, int len,
 	/* output */ char *hex )
 {
@@ -356,7 +376,7 @@ inline static int hex2int(char hex_digit)
 	<0 is returned on an unescaping error, length of the
 	unescaped string otherwise
 */
-inline static int un_escape(str *user, str *new_user ) 
+inline static int un_escape(str *user, str *new_user )
 {
  	int i, j, value;
 	int hi, lo;
@@ -410,7 +430,7 @@ inline static int un_escape(str *user, str *new_user )
 error:
 	new_user->len = j;
 	return -1;
-} 
+}
 
 
 /*
@@ -432,7 +452,7 @@ static inline void strlower(str* _s)
 static inline int str2int(str* _s, unsigned int* _r)
 {
 	int i;
-	
+
 	*_r = 0;
 	for(i = 0; i < _s->len; i++) {
 		if ((_s->s[i] >= '0') && (_s->s[i] <= '9')) {
@@ -442,7 +462,7 @@ static inline int str2int(str* _s, unsigned int* _r)
 			return -1;
 		}
 	}
-	
+
 	return 0;
 }
 
@@ -453,7 +473,7 @@ static inline int str2sint(str* _s, int* _r)
 {
 	int i;
 	int s;
-	
+
 	*_r = 0;
 	s = 1;
 	i=0;
@@ -498,7 +518,7 @@ static inline int shm_str_dup(str* dst, const str* src)
 		LM_ERR("no shared memory left\n");
 		return -1;
 	}
-	
+
 	memcpy(dst->s, src->s, src->len);
 	dst->len = src->len;
 	return 0;
@@ -515,7 +535,7 @@ static inline int pkg_str_dup(str* dst, const str* src)
 		LM_ERR("no private memory left\n");
 		return -1;
 	}
-	
+
 	memcpy(dst->s, src->s, src->len);
 	dst->len = src->len;
 	return 0;
@@ -531,7 +551,7 @@ static inline int str_strcmp(const str *stra, const str *strb)
 	int blen;
 	int minlen;
 
-	if(stra==NULL || strb==NULL || stra->s ==NULL || strb->s==NULL 
+	if(stra==NULL || strb==NULL || stra->s ==NULL || strb->s==NULL
 	|| stra->len<0 || strb->len<0)
 	{
 		LM_ERR("bad parameters\n");
@@ -586,7 +606,7 @@ static inline int str_strcasecmp(const str *stra, const str *strb)
 		if (a > b)
 			return 1;
 	}
-	if (alen < blen) 
+	if (alen < blen)
 		return -1;
 	else if (alen > blen)
 		return 1;
@@ -638,7 +658,7 @@ static inline int get_time_diff(struct timeval *begin)
 	seconds  = end.tv_sec  - begin->tv_sec;
 	useconds = end.tv_usec - begin->tv_usec;
 	mtime = ((seconds) * 1000000 + useconds);
-        
+
 	return mtime;
 }
 
@@ -648,7 +668,7 @@ static inline int get_time_diff(struct timeval *begin)
 			min_action_time=0; \
 			memset(longest_action,0,LONGEST_ACTION_SIZE*sizeof(action_time)); \
 		} \
-	} while (0) 
+	} while (0)
 
 static inline void log_expiry(int time_diff,int expire,
 					const char *func_info,char *extra_dbg,int dbg_len,int tcp)
@@ -716,7 +736,7 @@ static inline void log_expiry(int time_diff,int expire,
 		}
 	}
 	return;
-error:	
+error:
 	evi_free_params(list);
 }
 

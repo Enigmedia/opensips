@@ -26,7 +26,7 @@
  */
 
 /*!
- * \file 
+ * \file
  * \brief MI :: Tree
  * \ingroup mi
  */
@@ -48,7 +48,8 @@ struct mi_handler;
 #define MI_DUP_NAME   		(1<<0)
 #define MI_DUP_VALUE  		(1<<1)
 #define MI_NOT_COMPLETED  	(1<<2)
-#define MI_WRITTEN		(1<<3)
+#define MI_WRITTEN			(1<<3)
+#define MI_IS_ARRAY			(1<<4)
 
 #define MI_OK_S              "OK"
 #define MI_OK_LEN            (sizeof(MI_OK_S)-1)
@@ -64,6 +65,8 @@ struct mi_handler;
 #define MI_INTERNAL_ERR       MI_INTERNAL_ERR_S
 #define MI_MISSING_PARM       MI_MISSING_PARM_S
 #define MI_BAD_PARM           MI_BAD_PARM_S
+
+#define MI_DATE_BUF_LEN 21
 
 struct mi_node {
 	str value;

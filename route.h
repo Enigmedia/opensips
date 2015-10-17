@@ -15,13 +15,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 /*!
- * \file 
+ * \file
  * \brief SIP routing engine
  */
 
@@ -108,5 +108,8 @@ int check_rls();
 int eval_expr(struct expr* e, struct sip_msg* msg, pv_value_t *val);
 
 int run_startup_route(void);
+
+int is_script_func_used( char *name, int param_no);
+
 
 #endif

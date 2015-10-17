@@ -18,23 +18,25 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History
  * -------
  * 2004-07-31  first version, by daniel
  * 2007-01-11  Added a function to check if a specific gateway is in a group
- *				(carsten - Carsten Bock, BASIS AudioNet GmbH)
+ *              (carsten - Carsten Bock, BASIS AudioNet GmbH)
  * 2007-02-09  Added active probing of failed destinations and automatic
- *				re-enabling of destinations (carsten)
+ *              re-enabling of destinations (carsten)
  * 2007-05-08  Ported the changes to SVN-Trunk and renamed ds_is_domain
- *				to ds_is_from_list.  (carsten)
- * 2007-07-18  Added support for load/reload groups from DB 
- * 			   reload triggered from ds_reload MI_Command (ancuta)
+ *              to ds_is_from_list.  (carsten)
+ * 2007-07-18  Added support for load/reload groups from DB
+ *              reload triggered from ds_reload MI_Command (ancuta)
  * 2009-05-18  Added support for weights for the destinations;
- * 			   added support for custom "attrs" (opaque string) (bogdan)
+ *              added support for custom "attrs" (opaque string) (bogdan)
+ * 2013-12-02  Added support state persistency (restart and reload) (bogdan)
+ * 2013-12-05  Added a safer reload mechanism based on locking read/writter (bogdan)
  */
 
 #include <stdio.h>
@@ -54,20 +56,21 @@
 #include "../../db/db.h"
 
 #include "dispatch.h"
+#include "ds_bl.h"
 
 
 #define DS_SET_ID_COL		"setid"
 #define DS_DEST_URI_COL		"destination"
 #define DS_DEST_SOCK_COL	"socket"
-#define DS_DEST_FLAGS_COL	"flags"
+#define DS_DEST_STATE_COL	"state"
 #define DS_DEST_WEIGHT_COL	"weight"
 #define DS_DEST_ATTRS_COL	"attrs"
 #define DS_TABLE_NAME 		"dispatcher"
 
 /** parameters */
 int  ds_force_dst   = 0;
-int  ds_flags       = 0; 
-int  ds_use_default = 0; 
+int  ds_flags       = 0;
+int  ds_use_default = 0;
 static str dst_avp_param = str_init("$avp(ds_dst_failover)");
 static str grp_avp_param = str_init("$avp(ds_grp_failover)");
 static str cnt_avp_param = str_init("$avp(ds_cnt_failover)");
@@ -101,7 +104,7 @@ str ds_db_url         = {NULL, 0};
 str ds_set_id_col     = str_init(DS_SET_ID_COL);
 str ds_dest_uri_col   = str_init(DS_DEST_URI_COL);
 str ds_dest_sock_col  = str_init(DS_DEST_SOCK_COL);
-str ds_dest_flags_col = str_init(DS_DEST_FLAGS_COL);
+str ds_dest_state_col = str_init(DS_DEST_STATE_COL);
 str ds_dest_weight_col= str_init(DS_DEST_WEIGHT_COL);
 str ds_dest_attrs_col = str_init(DS_DEST_ATTRS_COL);
 str ds_table_name     = str_init(DS_TABLE_NAME);
@@ -111,7 +114,7 @@ pv_spec_t ds_setid_pv;
 
 static str options_reply_codes_str= {0, 0};
 static int* options_reply_codes = NULL;
-static int options_codes_no; 
+static int options_codes_no;
 static char *probing_sock_s = NULL;
 struct socket_info *probing_sock = NULL;
 
@@ -119,8 +122,10 @@ struct socket_info *probing_sock = NULL;
 static str dispatcher_event = str_init("E_DISPATCHER_STATUS");
 event_id_t dispatch_evi_id;
 
+
 /** module functions */
 static int mod_init(void);
+static int ds_child_init(int rank);
 
 static int w_ds_select_dst(struct sip_msg*, char*, char*);
 static int w_ds_select_dst_limited(struct sip_msg*, char*, char*, char*);
@@ -146,7 +151,6 @@ static struct mi_root* ds_mi_set(struct mi_root* cmd, void* param);
 static struct mi_root* ds_mi_list(struct mi_root* cmd, void* param);
 static struct mi_root* ds_mi_reload(struct mi_root* cmd_tree, void* param);
 static int mi_child_init(void);
-
 
 static cmd_export_t cmds[]={
 	{"ds_select_dst",    (cmd_function)w_ds_select_dst,    2, fixup_igp_igp, 0,
@@ -183,7 +187,7 @@ static param_export_t params[]={
 	{"setid_col",       STR_PARAM, &ds_set_id_col.s},
 	{"destination_col", STR_PARAM, &ds_dest_uri_col.s},
 	{"socket_col",      STR_PARAM, &ds_dest_sock_col.s},
-	{"flags_col",       STR_PARAM, &ds_dest_flags_col.s},
+	{"state_col",       STR_PARAM, &ds_dest_state_col.s},
 	{"weight_col",      STR_PARAM, &ds_dest_weight_col.s},
 	{"attrs_col",       STR_PARAM, &ds_dest_attrs_col.s},
 	{"force_dst",       INT_PARAM, &ds_force_dst},
@@ -231,7 +235,7 @@ struct module_exports exports= {
 	mod_init,   /* module initialization function */
 	(response_function) 0,
 	(destroy_function) destroy,
-	0,          /* per-child init function */
+	ds_child_init, /* per-child init function */
 };
 
 
@@ -246,22 +250,14 @@ static int mod_init(void)
 
 	/* Load stuff from DB */
 	init_db_url( ds_db_url , 0 /*cannot be null*/);
-	if(init_data()!= 0)
-		return -1;
 
 	ds_table_name.len = strlen(ds_table_name.s);
 	ds_set_id_col.len = strlen(ds_set_id_col.s);
 	ds_dest_uri_col.len = strlen(ds_dest_uri_col.s);
 	ds_dest_sock_col.len = strlen(ds_dest_sock_col.s);
-	ds_dest_flags_col.len = strlen(ds_dest_flags_col.s);
+	ds_dest_state_col.len = strlen(ds_dest_state_col.s);
 	ds_dest_weight_col.len = strlen(ds_dest_weight_col.s);
 	ds_dest_attrs_col.len = strlen(ds_dest_attrs_col.s);
-
-	if(init_ds_db()!= 0)
-	{
-		LM_ERR("failed to load data from database\n");
-		return -1;
-	}
 
 	/* handle AVPs spec */
 	dst_avp_param.len = strlen(dst_avp_param.s);
@@ -335,22 +331,12 @@ static int mod_init(void)
 		attrs_avp_type = 0;
 	}
 
-	if (init_ds_bls()!=0) {
-		LM_ERR("failed to init DS blacklists\n");
-		return E_CFG;
-	}
-
-	if (populate_ds_bls()) {
-		LM_ERR("Failed to populate DS blacklist\n");
-		return E_CFG;
-	}
-
 	if (hash_pvar_param.s && (hash_pvar_param.len=strlen(hash_pvar_param.s))>0 ) {
 		if(pv_parse_format(&hash_pvar_param, &hash_param_model) < 0
 				|| hash_param_model==NULL) {
 			LM_ERR("malformed PV string: %s\n", hash_pvar_param.s);
 			return -1;
-		}		
+		}
 	} else {
 		hash_param_model = NULL;
 	}
@@ -367,6 +353,31 @@ static int mod_init(void)
 	pvar_algo_param.len = strlen(pvar_algo_param.s);
 	if (pvar_algo_param.len)
 		ds_pvar_parse_pattern(pvar_algo_param);
+
+	if (init_ds_bls()!=0) {
+		LM_ERR("failed to init DS blacklists\n");
+		return E_CFG;
+	}
+
+	if (init_ds_data()!=0) {
+		LM_ERR("failed to init DS data holder\n");
+		return -1;
+	}
+
+	/* open DB connection to load provisioning data */
+	if (init_ds_db()!= 0) {
+		LM_ERR("failed to init database support\n");
+		return -1;
+	}
+
+	/* do the actula data load */
+	if (ds_reload_db()!=0) {
+		LM_ERR("failed to load data from DB\n");
+		return -1;
+	}
+
+	/* close DB connection */
+	ds_disconnect_db();
 
 	/* Only, if the Probing-Timer is enabled the TM-API needs to be loaded: */
 	if (ds_ping_interval > 0)
@@ -422,9 +433,29 @@ static int mod_init(void)
 		}
 	}
 
-	dispatch_evi_id = evi_publish_event(dispatcher_event); 
+	/* register timer to flush the state of destination back to DB */
+	if (register_timer("ds-flusher",ds_flusher_routine,NULL, 30)<0){
+		LM_ERR("failed to register timer for DB flushing!\n");
+		return -1;
+	}
+
+	dispatch_evi_id = evi_publish_event(dispatcher_event);
 	if (dispatch_evi_id == EVI_ERROR)
 		LM_ERR("cannot register dispatcher event\n");
+	return 0;
+}
+
+
+/*
+ * Per process init function
+ */
+#include "../../pt.h"
+static int ds_child_init(int rank)
+{
+	/* we need DB connection from the timer procs (for the flushing)
+	 * and from the main proc (for final flush on shutdown) */
+	if ( (process_no==0 || rank==PROC_TIMER) && ds_db_url.s)
+		return ds_connect_db();
 	return 0;
 }
 
@@ -434,7 +465,6 @@ static int mi_child_init(void)
 	if(ds_db_url.s)
 		return ds_connect_db();
 	return 0;
-
 }
 
 
@@ -444,114 +474,255 @@ static int mi_child_init(void)
 static void destroy(void)
 {
 	LM_DBG("destroying module ...\n");
-	ds_destroy_list();
+
+	/* flush the state of the destinations */
+	ds_flusher_routine(0, NULL);
+
+	ds_destroy_data();
 
 	/* destroy blacklists */
 	destroy_ds_bls();
 }
 
 
+#define GET_VALUE(param_name,param,i_value,s_value,value_flags) do{ \
+	if(fixup_get_isvalue(msg, (gparam_p)(param), &(i_value), &(s_value), &(value_flags))!=0) { \
+		LM_ERR("no %s value\n", (param_name)); \
+		return -1; \
+	} \
+}while(0)
+
+#define CHECK_INVALID_PARAM(param) do{ \
+	str_trim_spaces_lr(param); \
+	if ((param).s[0] == ',' || (param).s[(param).len-1]==',') { \
+		LM_ERR("Empty slot in param [%.*s]\n", (param).len, (param).s); \
+		return -1; \
+	} \
+}while(0)
+
+#define PARSE_PARAM(param_name,param,ctl_param) do{ \
+	p = q_memrchr( (param).s , ',' , (param).len); \
+	_param.s = (p==NULL)?(param).s:p+1; \
+	_param.len = (p==NULL)?(param).len:((param).s+(param).len-p-1); \
+	(param).len -= _param.len + (p?1:0); \
+	if (_param.len<=0) { \
+		LM_ERR("empty slot\n"); \
+		goto error; \
+	} else { \
+		str_trim_spaces_lr(_param); \
+		if (_param.len<=0) { \
+			LM_ERR("empty %s slot after trimming\n", (param_name)); \
+			goto error; \
+		} \
+		if (str2sint(&_param, &(ctl_param))!=0) { \
+			LM_ERR("bogus %s slot [%.*s]\n", (param_name), _param.len,_param.s); \
+			goto error; \
+		} \
+	} \
+}while(0)
+
+#define DBG_PARSE_PARAM(param_name,param,ctl_param) do{ \
+	p = q_memrchr( (param).s , ',' , (param).len); \
+	_param.s = (p==NULL)?(param).s:p+1; \
+	_param.len = (p==NULL)?(param).len:((param).s+(param).len-p-1); \
+	(param).len -= _param.len + (p?1:0); \
+	LM_DBG("got %s slot [%p][%d]->[%.*s]\n", (param_name), _param.s,_param.len, _param.len,_param.s); \
+	if (_param.len<=0) { \
+		LM_ERR("empty slot\n"); \
+		goto error; \
+	} else { \
+		str_trim_spaces_lr(_param); \
+		if (_param.len<=0) { \
+			LM_ERR("empty %s slot after trimming\n", (param_name)); \
+			goto error; \
+		} \
+		if (str2sint(&_param, &(ctl_param))!=0) { \
+			LM_ERR("bogus %s slot [%.*s]\n", (param_name), _param.len,_param.s); \
+			goto error; \
+		} \
+		LM_DBG("found %s    [%p][%d]->[%.*s] => [%d]\n", \
+				(param_name), _param.s,_param.len, _param.len,_param.s, (ctl_param)); \
+	} \
+}while(0)
+
+
+/**
+ *
+ */
+static int w_ds_select(struct sip_msg* msg, char* set, char* alg, char* max_results, int mode)
+{
+	unsigned int algo_flags, set_flags, max_flags;
+	str s_algo = {NULL, 0};
+	str s_set = {NULL, 0};
+	str s_max = {NULL, 0};
+	str _param;
+	char *p;
+	int ret;
+	int run_prev_ds_select = 0;
+	ds_select_ctl_t prev_ds_select_ctl, ds_select_ctl;
+
+	if(msg==NULL)
+		return -1;
+
+	ds_select_ctl.mode = mode;
+	ds_select_ctl.max_results = 1000;
+	ds_select_ctl.reset_AVP = 1;
+	ds_select_ctl.set_destination = 1;
+
+	/* Retrieve dispatcher set */
+	GET_VALUE("destination set", set, ds_select_ctl.set, s_set, set_flags);
+
+	/* Retrieve dispatcher algorithm */
+	GET_VALUE("algorithm", alg, ds_select_ctl.alg, s_algo, algo_flags);
+
+	/* Retrieve dispatcher max results */
+	if (max_results) {
+		GET_VALUE("max results", max_results, ds_select_ctl.max_results, s_max, max_flags);
+		if( !( (set_flags  & GPARAM_INT_VALUE_FLAG)
+			&& (algo_flags & GPARAM_INT_VALUE_FLAG)
+			&& (max_flags  & GPARAM_INT_VALUE_FLAG) ) ) {
+			goto handle_str_params;
+		}
+	} else {
+		if( !( (set_flags  & GPARAM_INT_VALUE_FLAG)
+			&& (algo_flags & GPARAM_INT_VALUE_FLAG) ) ) {
+			goto handle_str_params;
+		}
+	}
+
+	return ds_select_dst(msg, &ds_select_ctl);
+
+handle_str_params:
+	if (max_results) {
+		if(  ( (set_flags  & GPARAM_INT_VALUE_FLAG)
+			|| (algo_flags & GPARAM_INT_VALUE_FLAG)
+			|| (max_flags  & GPARAM_INT_VALUE_FLAG) ) ) {
+			LM_ERR("Mixed param types: set_flags=[%u] algo_flags=[%u] max_flags=[%u]\n",
+				set_flags, algo_flags, max_flags);
+			return -1;
+		}
+		if( !( (set_flags  & GPARAM_STR_VALUE_FLAG)
+			&& (algo_flags & GPARAM_STR_VALUE_FLAG)
+			&& (max_flags  & GPARAM_STR_VALUE_FLAG) ) ) {
+			LM_ERR("Not all params are strings: set_flags=[%u] algo_flags=[%u] max_flags=[%u]\n",
+				set_flags, algo_flags, max_flags);
+			return -1;
+		}
+	} else {
+		if(  ( (set_flags  & GPARAM_INT_VALUE_FLAG)
+			|| (algo_flags & GPARAM_INT_VALUE_FLAG) ) ) {
+			LM_ERR("Mixed param types: set_flags=[%u] algo_flags=[%u]\n",
+				set_flags, algo_flags);
+			return -1;
+		}
+		if( !( (set_flags  & GPARAM_STR_VALUE_FLAG)
+			&& (algo_flags & GPARAM_STR_VALUE_FLAG) ) ) {
+			LM_ERR("Not all params are strings: set_flags=[%u] algo_flags=[%u]\n",
+				set_flags, algo_flags);
+			return -1;
+		}
+	}
+
+	CHECK_INVALID_PARAM(s_set);
+	CHECK_INVALID_PARAM(s_algo);
+	if (max_results) CHECK_INVALID_PARAM(s_max);
+
+	/* Avoid compiler warning */
+	memset(&prev_ds_select_ctl, 0, sizeof(ds_select_ctl_t));
+
+	ds_select_ctl.set_destination = 0;
+
+	/* Parse the params in reverse order.
+	 * We need to runt the first entry last to properly populate ds_select_dst AVPs.
+	 * On the first ds_select_dst run we need to reset AVPs.
+	 * On the last ds_select_dst run we need to set destination.  */
+	do {
+		PARSE_PARAM("set", s_set,  ds_select_ctl.set);
+		PARSE_PARAM("alg", s_algo, ds_select_ctl.alg);
+		if (max_results) PARSE_PARAM("max", s_max, ds_select_ctl.max_results);
+
+		if (run_prev_ds_select) {
+			LM_DBG("ds_select: %d %d %d %d %d\n",
+				prev_ds_select_ctl.set, prev_ds_select_ctl.alg, prev_ds_select_ctl.max_results,
+				prev_ds_select_ctl.reset_AVP, prev_ds_select_ctl.set_destination);
+			ret = ds_select_dst(msg, &prev_ds_select_ctl);
+			if (ret<0) return ret;
+			/* stop resetting AVPs. */
+			ds_select_ctl.reset_AVP = 0;
+		} else {
+			/* Enable running ds_select_dst on next loop. */
+			run_prev_ds_select = 1;
+		}
+		prev_ds_select_ctl = ds_select_ctl;
+	} while (s_set.len>0 || s_algo.len>0);
+
+	if (max_results && s_max.len>0) {
+		LM_ERR("extra max slot(s) [%.*s]\n", s_max.len,s_max.s);
+		goto error;
+	}
+
+	/* las ds_select_dst run: setting destination. */
+	ds_select_ctl.set_destination = 1;
+	LM_DBG("ds_select: %d %d %d %d %d\n",
+		ds_select_ctl.set, ds_select_ctl.alg, ds_select_ctl.max_results,
+		ds_select_ctl.reset_AVP, ds_select_ctl.set_destination);
+	return ds_select_dst(msg, &ds_select_ctl);
+
+error:
+	return -1;
+}
+
+/**
+ *
+ */
+static int w_ds_select_all(struct sip_msg* msg, char* set, char* alg, int mode)
+{
+	return w_ds_select(msg, set, alg, NULL, mode);
+}
+
+/**
+ *
+ */
+static int w_ds_select_limited(struct sip_msg* msg, char* set, char* alg, char* max_results, int mode)
+{
+	return w_ds_select(msg, set, alg, max_results, mode);
+}
+
 /**
  *
  */
 static int w_ds_select_dst(struct sip_msg* msg, char* set, char* alg)
 {
-	int a, s;
-	
-	if(msg==NULL)
-		return -1;
-	if(fixup_get_ivalue(msg, (gparam_p)set, &s)!=0)
-	{
-		LM_ERR("no dst set value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)alg, &a)!=0)
-	{
-		LM_ERR("no alg value\n");
-		return -1;
-	}
-
-	return ds_select_dst(msg, s, a, 0 /*set dst uri*/, 1000);
+	return w_ds_select_all(msg, set, alg, 0);
 }
+
 
 /**
  * same wrapper as w_ds_select_dst, but it allows cutting down the result set
  */
 static int w_ds_select_dst_limited(struct sip_msg* msg, char* set, char* alg, char* max_results)
 {
-	int a, s, m;
-
-	if(msg==NULL)
-		return -1;
-	if(fixup_get_ivalue(msg, (gparam_p)set, &s)!=0)
-	{
-		LM_ERR("no dst set value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)alg, &a)!=0)
-	{
-		LM_ERR("no alg value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)max_results, &m)!=0)
-	{
-		LM_ERR("no max results value\n");
-		return -1;
-	}
-
-	return ds_select_dst(msg, s, a, 0 /*set dst uri*/, m);
+	return w_ds_select_limited(msg, set, alg, max_results, 0);
 }
+
 
 /**
  *
  */
 static int w_ds_select_domain(struct sip_msg* msg, char* set, char* alg)
 {
-	int a, s;
-	if(msg==NULL)
-		return -1;
-
-	if(fixup_get_ivalue(msg, (gparam_p)set, &s)!=0)
-	{
-		LM_ERR("no dst set value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)alg, &a)!=0)
-	{
-		LM_ERR("no alg value\n");
-		return -1;
-	}
-
-	return ds_select_dst(msg, s, a, 1/*set host port*/, 1000);
+	return w_ds_select_all(msg, set, alg, 1);
 }
 
+
 /**
- *
+ * same wrapper as w_ds_select_domain, but it allows cutting down the result set
  */
 static int w_ds_select_domain_limited(struct sip_msg* msg, char* set, char* alg, char* max_results)
 {
-	int a, s, m;
-	if(msg==NULL)
-		return -1;
-
-	if(fixup_get_ivalue(msg, (gparam_p)set, &s)!=0)
-	{
-		LM_ERR("no dst set value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)alg, &a)!=0)
-	{
-		LM_ERR("no alg value\n");
-		return -1;
-	}
-	if(fixup_get_ivalue(msg, (gparam_p)max_results, &m)!=0)
-	{
-		LM_ERR("no max results value\n");
-		return -1;
-	}
-
-	return ds_select_dst(msg, s, a, 1/*set host port*/, m);
+	return w_ds_select_limited(msg, set, alg, max_results, 1);
 }
+
 
 /**
  *
@@ -561,6 +732,7 @@ static int w_ds_next_dst(struct sip_msg *msg, char *str1, char *str2)
 	return ds_next_dst(msg, 0/*set dst uri*/);
 }
 
+
 /**
  *
  */
@@ -569,6 +741,7 @@ static int w_ds_next_domain(struct sip_msg *msg, char *str1, char *str2)
 	return ds_next_dst(msg, 1/*set host port*/);
 }
 
+
 /**
  *
  */
@@ -576,6 +749,7 @@ static int w_ds_mark_dst0(struct sip_msg *msg, char *str1, char *str2)
 {
 	return ds_mark_dst(msg, 0);
 }
+
 
 /**
  *
@@ -608,7 +782,7 @@ static int in_list_fixup(void** param, int param_no)
 		return fixup_pvar(param);
 	} else if (param_no==3) {
 		/* the group to check in */
-		return fixup_uint(param);
+		return fixup_sint(param);
 	} else if (param_no==4) {
 		/*  active only check ? */
 		return fixup_uint(param);
@@ -617,6 +791,7 @@ static int in_list_fixup(void** param, int param_no)
 		return -1;
 	}
 }
+
 
 static int ds_count_fixup(void** param, int param_no)
 {
@@ -673,6 +848,7 @@ static int ds_count_fixup(void** param, int param_no)
 	return 0;
 }
 
+
 /************************** MI STUFF ************************/
 
 static struct mi_root* ds_mi_set(struct mi_root* cmd_tree, void* param)
@@ -689,25 +865,30 @@ static struct mi_root* ds_mi_set(struct mi_root* cmd_tree, void* param)
 	if(sp.len<=0 || !sp.s)
 	{
 		LM_ERR("bad state value\n");
-		return init_mi_tree( 500, "bad state value", 15);
+		return init_mi_tree( 500, MI_SSTR("Bad state value") );
 	}
 
-	state = 1;
 	if(sp.s[0]=='0' || sp.s[0]=='I' || sp.s[0]=='i')
 		state = 0;
+	else if(sp.s[0]=='p' || sp.s[0]=='P' || sp.s[0]=='2')
+		state = 2;
+	else if(sp.s[0]=='a' || sp.s[0]=='A' || sp.s[0]=='1')
+		state = 1;
+	else
+		return init_mi_tree( 500, MI_SSTR("Bad state value") );
+
 	node = node->next;
 	if(node == NULL)
 		return init_mi_tree( 400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN);
 	sp = node->value;
 	if(sp.s == NULL)
 	{
-		return init_mi_tree(500, "group not found", 15);
+		return init_mi_tree(500, MI_SSTR("group not found"));
 	}
-
 	if(str2int(&sp, &group))
 	{
 		LM_ERR("bad group value\n");
-		return init_mi_tree( 500, "bad group value", 16);
+		return init_mi_tree( 500, MI_SSTR("bad group value"));
 	}
 
 	node= node->next;
@@ -717,18 +898,26 @@ static struct mi_root* ds_mi_set(struct mi_root* cmd_tree, void* param)
 	sp = node->value;
 	if(sp.s == NULL)
 	{
-		return init_mi_tree(500,"address not found", 18 );
+		return init_mi_tree(500, MI_SSTR("address not found"));
 	}
 
-	if(state==1)
-		ret = ds_set_state(group, &sp, DS_INACTIVE_DST, 0);
-	else
+	if (state==1) {
+		/* set active */
+		ret = ds_set_state(group, &sp, DS_INACTIVE_DST|DS_PROBING_DST, 0);
+	} else if (state==2) {
+		/* set probing */
+		ret = ds_set_state(group, &sp, DS_PROBING_DST, 1);
+		if (ret==0)
+			ret = ds_set_state(group, &sp, DS_INACTIVE_DST, 0);
+	} else {
+		/* set inactive */
 		ret = ds_set_state(group, &sp, DS_INACTIVE_DST, 1);
+		if (ret == 0)
+			ret = ds_set_state(group, &sp, DS_PROBING_DST, 0);
+	}
 
 	if(ret!=0)
-	{
-		return init_mi_tree(404, "destination not found", 21);
-	}
+		return init_mi_tree(404, MI_SSTR("destination not found"));
 
 	return init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
 }
@@ -741,6 +930,7 @@ static struct mi_root* ds_mi_list(struct mi_root* cmd_tree, void* param)
 	rpl_tree = init_mi_tree(200, MI_OK_S, MI_OK_LEN);
 	if (rpl_tree==NULL)
 		return 0;
+	rpl_tree->node.flags |= MI_IS_ARRAY;
 
 	if( ds_print_mi_list(&rpl_tree->node)< 0 )
 	{
@@ -754,19 +944,12 @@ static struct mi_root* ds_mi_list(struct mi_root* cmd_tree, void* param)
 
 #define MI_ERR_RELOAD 			"ERROR Reloading data"
 #define MI_ERR_RELOAD_LEN 		(sizeof(MI_ERR_RELOAD)-1)
-#define MI_NOT_SUPPORTED		"DB mode not configured"
-#define MI_NOT_SUPPORTED_LEN 	(sizeof(MI_NOT_SUPPORTED)-1)
-
 static struct mi_root* ds_mi_reload(struct mi_root* cmd_tree, void* param)
 {
-	if (ds_load_db()<0)
+	if (ds_reload_db()<0)
 		return init_mi_tree(500, MI_ERR_RELOAD, MI_ERR_RELOAD_LEN);
 
-	if (populate_ds_bls()<0) {
-		return init_mi_tree(500, MI_ERR_RELOAD, MI_ERR_RELOAD_LEN);
-	}
-
-	return init_mi_tree(200, MI_OK_S, MI_OK_LEN);
+	return init_mi_tree(200, MI_SSTR(MI_OK_S));
 }
 
 
@@ -814,7 +997,7 @@ static int w_ds_count(struct sip_msg* msg, char *set, const char *cmp, char *res
 int check_options_rplcode(int code)
 {
 	int i;
-	
+
 	for (i =0; i< options_codes_no; i++)
 	{
 		if(options_reply_codes[i] == code)

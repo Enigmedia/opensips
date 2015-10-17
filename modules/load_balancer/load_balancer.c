@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -54,7 +54,7 @@ static char *table_name = NULL;
 struct dlg_binds lb_dlg_binds;
 
 /* reader-writers lock for data reloading */
-static rw_lock_t *ref_lock = NULL; 
+static rw_lock_t *ref_lock = NULL;
 struct lb_data **curr_data = NULL;
 
 /* probing related stuff */
@@ -198,7 +198,7 @@ static int fixup_resources(void** param, int param_no)
 			}
 			if (pv_parse_spec(&s, lbgp->grp_pv)==0 ||
 			lbgp->grp_pv->type==PVT_NULL) {
-				LM_ERR("%s is not interger nor PV !\n", (char*)*param);
+				LM_ERR("%s is not integer nor PV !\n", (char*)*param);
 				return E_UNSPEC;
 			}
 		}
@@ -207,7 +207,7 @@ static int fixup_resources(void** param, int param_no)
 
 	} else if (param_no==2) {
 
-		/* parameter is string (semi-colon separated list) 
+		/* parameter is string (semi-colon separated list)
 		 * of needed resources */
 		lbp = (struct lb_res_parse *)pkg_malloc(sizeof(struct lb_res_parse));
 		if (!lbp) {
@@ -748,7 +748,7 @@ error:
 }
 
 /*! \brief
- * Expects 3 nodes: 
+ * Expects 3 nodes:
  *        destination ID (number)
  *        resource name (string)
  *        size (number)
@@ -795,7 +795,7 @@ static struct mi_root* mi_lb_resize(struct mi_root *cmd, void *param)
 			memcmp( dst->rmap[n].resource->name.s, name->s, name->len)==0)
 				break;
 		if (n==dst->rmap_no) {
-			rpl_tree = init_mi_tree( 404, 
+			rpl_tree = init_mi_tree( 404,
 				MI_SSTR("Destination has no such resource"));
 		} else {
 			dst->rmap[n].max_load = size;
@@ -813,7 +813,7 @@ bad_syntax:
 
 
 /*! \brief
- * Expects 2 nodes: 
+ * Expects 2 nodes:
  *        destination ID (number)
  *        status (number)
  */
@@ -875,7 +875,7 @@ static struct mi_root* mi_lb_status(struct mi_root *cmd, void *param)
 					dst->flags &=
 						~ (LB_DST_STAT_DSBL_FLAG|LB_DST_STAT_NOEN_FLAG);
 				} else {
-					dst->flags |= 
+					dst->flags |=
 						LB_DST_STAT_DSBL_FLAG|LB_DST_STAT_NOEN_FLAG;
 				}
 				lock_stop_read( ref_lock );
@@ -896,7 +896,7 @@ static struct mi_root* mi_lb_list(struct mi_root *cmd_tree, void *param)
 {
 	struct mi_root *rpl_tree;
 	struct mi_node *dst_node;
-	struct mi_node *node;
+	struct mi_node *node, *node1;
 	struct mi_attr *attr;
 	struct lb_dst *dst;
 	char *p;
@@ -906,6 +906,7 @@ static struct mi_root* mi_lb_list(struct mi_root *cmd_tree, void *param)
 	rpl_tree = init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
 	if (rpl_tree==NULL)
 		return NULL;
+	rpl_tree->node.flags |= MI_IS_ARRAY;
 
 	lock_start_read( ref_lock );
 
@@ -944,23 +945,27 @@ static struct mi_root* mi_lb_list(struct mi_root *cmd_tree, void *param)
 		if (attr==0)
 			goto error;
 
+		node = add_mi_node_child( dst_node, MI_IS_ARRAY, "Resources", 9, NULL, 0);
+		if (node==0)
+			goto error;
+
 		/* go through all resources */
 		for( i=0 ; i<dst->rmap_no ; i++) {
 		/* add a resource node */
-			node = add_mi_node_child( dst_node, 0, "Resource", 8,
+			node1 = add_mi_node_child( node, 0, "Resource", 8,
 				dst->rmap[i].resource->name.s,dst->rmap[i].resource->name.len);
-			if (dst_node==0)
+			if (node1==0)
 				goto error;
 
 			/* add some attributes to the destination node */
 			p= int2str((unsigned long)dst->rmap[i].max_load, &len);
-			attr = add_mi_attr( node, MI_DUP_VALUE, "max", 3, p, len);
+			attr = add_mi_attr( node1, MI_DUP_VALUE, "max", 3, p, len);
 			if (attr==0)
 				goto error;
 
 			p= int2str((unsigned long)lb_dlg_binds.get_profile_size
 				(dst->rmap[i].resource->profile, &dst->profile_id), &len);
-			attr = add_mi_attr( node, MI_DUP_VALUE, "load", 4, p, len);
+			attr = add_mi_attr( node1, MI_DUP_VALUE, "load", 4, p, len);
 			if (attr==0)
 				goto error;
 		}

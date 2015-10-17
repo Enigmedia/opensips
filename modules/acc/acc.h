@@ -16,8 +16,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -112,6 +112,9 @@ int  acc_evi_request( struct sip_msg *req, struct sip_msg *rpl);
 int  acc_evi_cdrs(struct dlg_cell *dlg, struct sip_msg *msg);
 int  store_evi_extra_values(struct dlg_cell *dlg, struct sip_msg *req,
 		struct sip_msg *reply);
+extern event_id_t acc_cdr_event;
+extern event_id_t acc_event;
+extern event_id_t acc_missed_event;
 
 
 
@@ -119,5 +122,6 @@ int  store_evi_extra_values(struct dlg_cell *dlg, struct sip_msg *req,
 int  acc_diam_init();
 int  acc_diam_request( struct sip_msg *req, struct sip_msg *rpl);
 #endif
+
 
 #endif

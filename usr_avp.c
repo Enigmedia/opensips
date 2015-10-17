@@ -15,8 +15,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -295,7 +295,7 @@ inline void get_avp_val(struct usr_avp *avp, int_str *val)
 		val->s = *((str*)data);
 	} else {
 		/* avp type ID, int value */
-			val->n = (long)(avp->data);
+		val->n = (long)(avp->data);
 	}
 }
 
@@ -342,7 +342,7 @@ struct usr_avp *search_first_avp( unsigned short flags,
 	if(start==0)
 	{
 		assert( crt_avps!=0 );
-	
+
 		if (*crt_avps==0)
 			return 0;
 		head = *crt_avps;
@@ -460,7 +460,7 @@ inline void destroy_avp_list( struct usr_avp **list )
 void reset_avps(void)
 {
 	assert( crt_avps!=0 );
-	
+
 	if ( crt_avps!=&global_avps) {
 		crt_avps = &global_avps;
 	}
@@ -471,7 +471,7 @@ void reset_avps(void)
 struct usr_avp** set_avp_list( struct usr_avp **list )
 {
 	struct usr_avp **foo;
-	
+
 	assert( crt_avps!=0 );
 
 	foo = crt_avps;
@@ -483,7 +483,7 @@ static inline int __search_avp_map(str *alias, map_t m)
 {
 	int **id = (int **)map_find(m, *alias);
 	LM_DBG("looking for [%.*s] avp %s - found %d\n", alias->len, alias->s,
-			m == avp_map_shm ? "in shm" : "", id ? p2int(*id) : -1);
+			m == avp_map_shm ? "in shm": "", id ? p2int(*id) : -1);
 	return id ? p2int(*id) : -1;
 }
 
@@ -582,3 +582,24 @@ int get_avp_id(str *name)
 	}
 	return id;
 }
+
+
+struct usr_avp *clone_avp_list(struct usr_avp *old)
+{
+	struct usr_avp *a;
+	int_str val;
+
+	if (!old) return NULL;
+
+	/* create a copy of the old AVP */
+	get_avp_val( old, &val );
+	a = new_avp( old->flags, old->id, val);
+	if (a==NULL) {
+		LM_ERR("cloning failed, trunking the list\n");
+		return NULL;
+	}
+
+	a->next = clone_avp_list(old->next);
+	return a;
+}
+

@@ -214,7 +214,7 @@ modparam("nathelper", "natping_socket", "192.168.1.1:5006")
 		<title>Set <varname>received_avp</varname> parameter</title>
 		<programlisting format="linespecific">
 ...
-modparam("nathelper", "received_avp", "$avp(i:42)")
+modparam("nathelper", "received_avp", "$avp(received)")
 ...
 </programlisting>
 		</example>
@@ -423,7 +423,7 @@ if (search("User-Agent: Cisco ATA.*") {
 			</itemizedlist>
 			</listitem>
 			<listitem><para>
-			<emphasis>ip_address</emphasis> - IP to be used for rewritting SDP.
+			<emphasis>ip_address</emphasis> - IP to be used for rewriting SDP.
 			If not specified, the received signalling IP will be used. The
 			parameter allows pseudo-variables usage. NOTE: For the IP to be
 			used, you need to use 0x02 or 0x08 flags, otherwise it will have
@@ -515,7 +515,7 @@ fix_nated_register();
 		<itemizedlist>
 			<listitem><para>
 			<emphasis>1</emphasis> -  Contact header field is searched 
-			for occurrence of RFC1918 addresses.
+			for occurrence of RFC1918 / RFC6598 addresses.
 			</para></listitem>
 			<listitem><para>
 			<emphasis>2</emphasis> -  the "received" test is used: address
@@ -523,11 +523,11 @@ fix_nated_register();
 			</para></listitem>
 			<listitem><para>
 			<emphasis>4</emphasis> -  Top Most VIA is searched 
-			for occurrence of RFC1918 addresses
+			for occurrence of RFC1918 / RFC6598 addresses
 			</para></listitem>
 			<listitem><para>
 			<emphasis>8</emphasis> -  SDP is searched for occurrence of 
-			RFC1918 addresses
+			RFC1918 / RFC6598 addresses
 			</para></listitem>
 			<listitem><para>
 			<emphasis>16</emphasis> -  test if the source port is different

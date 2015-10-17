@@ -28,9 +28,8 @@
 #ifndef _RTPPROXY_STREAM_H
 #define  _RTPPROXY_STREAM_H
 
-int fixup_var_str_int(void **, int);
-int rtpproxy_stream2uac2_f(struct sip_msg *, char *, char *);
-int rtpproxy_stream2uas2_f(struct sip_msg *, char *, char *);
+int rtpproxy_stream2uac4_f(struct sip_msg *, char *, char *, char *, char *);
+int rtpproxy_stream2uas4_f(struct sip_msg *, char *, char *, char *, char *);
 int rtpproxy_stop_stream2uac2_f(struct sip_msg *, char *, char *);
 int rtpproxy_stop_stream2uas2_f(struct sip_msg *, char *, char *);
 

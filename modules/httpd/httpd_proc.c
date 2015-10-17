@@ -47,21 +47,114 @@
 #include "../../sr_module.h"
 #include "../../str.h"
 #include "../../ut.h"
+#include "../../sliblist.h"
 #include "httpd_load.h"
 
 
 extern int port;
 extern str ip;
 extern str buffer;
+extern int post_buf_size;
 extern struct httpd_cb *httpd_cb_list;
 
 static const str MI_HTTP_U_URL = str_init("<html><body>"
 "Unable to parse URL!</body></html>");
+static const str MI_HTTP_U_METHOD = str_init("<html><body>"
+"Unsupported HTTP request!</body></html>");
+static const str MI_HTTP_U_CNT_TYPE = str_init("<html><body>"
+"Unsupported Content-Type!</body></html>");
+
+/**
+ * Data structure to store inside elents of slinkedl_list list.
+ */
+typedef struct str_str {
+	str key;
+	str val;
+} str_str_t;
+
 
 #ifdef LIBMICROHTTPD
 struct MHD_Daemon *dmn;
+
+struct post_request {
+	struct MHD_PostProcessor *pp;
+	int status;
+	enum HTTPD_CONTENT_TYPE content_type;
+	enum HTTPD_CONTENT_TYPE accept_type;
+	int content_len;
+	slinkedl_list_t *p_list;
+};
 #endif
 
+
+/**
+ * Allocator for the slinkedl_list list.
+ */
+void *httpd_alloc(size_t size) { return pkg_malloc(size); }
+
+/**
+ * De-allocator for the slinkedl_list list.
+ *
+ * @param ptr The pointer to memory that we want to free up.
+ */
+void httpd_free(void *ptr) { pkg_free(ptr); return; }
+
+/**
+ * Function to extract data from an element of a slinkedl_list list.
+ *
+ * @param e_data Pointer to the data stored by the current
+ *               element being processed (a str_str_t type).
+ * @param data   Pointer to the key idetifier.
+ * @param r_data Pointer where the value that we are looking for
+ */
+int httpd_get_val(void *e_data, void *data, void *r_data)
+{
+	str_str_t *kv = (str_str_t*)e_data;
+	str *val = (str*)r_data;
+	if (kv==NULL) {
+		LM_ERR("null data\n");
+	} else {
+		if (strncmp(kv->key.s, data, kv->key.len)==0) {
+			val->s = kv->val.s;
+			val->len = kv->val.len;
+			LM_DBG("DATA=[%p] [%p][%p] [%.*s]->[%.*s]\n",
+				kv, kv->key.s, kv->val.s,
+				kv->key.len, kv->key.s,
+				kv->val.len, kv->val.s);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/**
+ * Function to print data stored in  slinkedl_list list elemnts.
+ * For debugging purposes only.
+ */
+/*
+int httpd_print_data(void *e_data, void *data, void *r_data)
+{
+	str_str_t *kv = (str_str_t*)e_data;
+	if (kv==NULL) {
+		LM_ERR("null data\n");
+	} else {
+		LM_DBG("data=[%p] [%p][%p] [%.*s]->[%.*s]\n",
+			kv, kv->key.s, kv->val.s,
+			kv->key.len, kv->key.s,
+			kv->val.len, kv->val.s);
+	}
+	return 0;
+}
+*/
+
+
+/**
+ * Function that retrieves the callback function that should
+ * handle the current request.
+ *
+ * @param url Pointer to the root part of the HTTP URL.
+ * @return    The callback function to handle the HTTP request.
+ */
 struct httpd_cb *get_httpd_cb(const char *url)
 {
 	int url_len;
@@ -96,8 +189,201 @@ skip:
 	return NULL;
 }
 
-
 #ifdef LIBMICROHTTPD
+/**
+ * Handle regular POST data.
+ *
+ */
+static int post_iterator (void *cls,
+		enum MHD_ValueKind kind,
+		const char *key,
+		const char *filename,
+		const char *content_type,
+		const char *transfer_encoding,
+		const char *value, uint64_t off, size_t size)
+{
+	int key_len;
+	struct post_request *pr;
+	str_str_t *kv;
+	char *p;
+
+	LM_DBG("post_iterator: cls=%p, kind=%d key=[%p]->'%s'"
+			" filename='%s' content_type='%s' transfer_encoding='%s'"
+			" value=[%p]->'%s' off=%llu size=%zu\n",
+			cls, kind, key, key,
+			filename, content_type, transfer_encoding,
+			value, value, (long long unsigned int)off, size);
+
+
+	pr = (struct post_request*)cls;
+	if (pr==NULL) {
+		LM_CRIT("corrupted data: null cls\n");
+		pr->status = -1; return MHD_NO;
+	}
+
+	if (off!=0) {
+		if (size==0) {
+			/* This is the last call post_iterator call
+			 * before destroying the post_processor. */
+			return MHD_YES;
+		} else {
+			LM_ERR("Trunkated data: post_iterator buffer to small!"
+					" Increase post_buf_size value\n");
+			pr->status = -1; return MHD_NO;
+		}
+	}
+
+	if (key) {
+		key_len = strlen(key);
+		if (key_len==0) {
+			LM_ERR("empty key\n");
+			pr->status = -1; return MHD_NO;
+		}
+	} else {
+		LM_ERR("NULL key\n");
+		pr->status = -1; return MHD_NO;
+	}
+
+	if (filename) {
+		LM_ERR("we don't support file uploading\n");
+		pr->status = -1; return MHD_NO;
+	}
+	if (content_type) {
+		LM_ERR("we don't support content_type\n");
+		pr->status = -1; return MHD_NO;
+	}
+	if (transfer_encoding) {
+		LM_ERR("we don't support transfer_encoding\n");
+		pr->status = -1; return MHD_NO;
+	}
+
+	LM_DBG("[%.*s]->[%.*s]\n", key_len, key, (int)size, value);
+
+	kv = (str_str_t*)slinkedl_append(pr->p_list,
+						sizeof(str_str_t) + key_len + size);
+	p = (char*)(kv + 1);
+	kv->key.len = key_len; kv->key.s = p;
+	memcpy(p, key, key_len);
+	p += key_len;
+	kv->val.len = size; kv->val.s = p;
+	memcpy(p, value, size);
+	LM_DBG("inserting element pr=[%p] pp=[%p] p_list=[%p]\n",
+				pr, pr->pp, pr->p_list);
+
+	return MHD_YES;
+}
+
+/**
+ * Lookup for HTTP headers.
+ *
+ * @param cls   Pointer to store return data.
+ * @param kind  Specifies the source of the key-value pairs that
+ *              we are looking for in the HTTP protocol.
+ * @param key   The key.
+ * @param value The value.
+ *
+ * @return MHD_YES to continue iterating,
+ *         MHD_NO to abort the iteration.
+ */
+int getConnectionHeader(void *cls, enum MHD_ValueKind kind,
+					const char *key, const char *value)
+{
+	struct post_request *pr = (struct post_request*)cls;
+	str content_length;
+	unsigned int len;
+
+	if (cls == NULL) {
+		LM_ERR("Unable to store return data\n");
+		return MHD_NO;
+	}
+	if (kind != MHD_HEADER_KIND) {
+		LM_ERR("Got kind != MHD_HEADER_KIND\n");
+		return MHD_NO;
+	}
+
+	if (strcasecmp("Accept", key) == 0) {
+		LM_DBG("Accept=%s\n", value);
+		if (strcasecmp("text/xml", value) == 0)
+			pr->accept_type = HTTPD_TEXT_XML_CNT_TYPE;
+		else if (strcasecmp("application/json", value) == 0)
+			pr->accept_type = HTTPD_APPLICATION_JSON_CNT_TYPE;
+		else
+			pr->accept_type = HTTPD_UNKNOWN_CNT_TYPE;
+		return MHD_YES;
+	}
+	if (strcasecmp("Content-Type", key) == 0) {
+		LM_DBG("Content-Type=%s\n", value);
+		if (strcasecmp("text/xml", value) == 0)
+			pr->content_type = HTTPD_TEXT_XML_CNT_TYPE;
+		else if (strcasecmp("application/json", value) == 0)
+			pr->content_type = HTTPD_APPLICATION_JSON_CNT_TYPE;
+		else
+			pr->content_type = HTTPD_UNKNOWN_CNT_TYPE;
+		goto done;
+	}
+	if (strcasecmp("Content-Length", key) == 0) {
+		LM_DBG("Content-Length=%s\n", value);
+		content_length.s = (char*)value;
+		content_length.len = strlen(value);
+		if (str2int(&content_length, &len)<0) {
+			LM_ERR("got bogus Content-Length=%s\n", value);
+			pr->content_len = HTTPD_UNKNOWN_CONTENT_LEN;
+		} else
+			pr->content_len = len;
+		goto done;
+	}
+
+	return MHD_YES;
+
+done:
+	if (pr->content_type && pr->content_len)
+		return MHD_NO;
+	else
+		return MHD_YES;
+}
+
+
+/**
+ * Performs lookup values for given keys.
+ * For GET requests, we will use the libmicrohttpd's
+ * internal API: MHD_lookup_connection_value().
+ * For POST requests, we will retrieve the value from
+ * the slinkedl_list that was created and populated by
+ * the post_iterator().
+ *
+ * @param connection Pointer to the MHD_Connection
+ * @param key        The key for which we need to retrieve
+ *                   the value.
+ * @param con_cls    This is a pointer to the slinkedl_list
+ *                   that was passed back and forth via
+ *                   several callback between the application
+ *                   and the libmicrohttpd library.
+ * @param val        Pointer to the value that we are looking
+ *                   for.
+ */
+void httpd_lookup_arg(void *connection, const char *key,
+		void *con_cls, str *val)
+{
+	slinkedl_list_t *list = (slinkedl_list_t*)con_cls;
+
+	if (val) {
+		if (list==NULL) {
+			val->s = (char *)MHD_lookup_connection_value(
+					(struct MHD_Connection *)connection,
+						MHD_GET_ARGUMENT_KIND, key);
+			if (val->s) val->len = strlen(val->s);
+			else val->len = 0;
+		} else {
+			slinkedl_traverse(list, &httpd_get_val, (void *)key, val);
+		}
+	} else {
+		LM_ERR("NULL holder for requested val\n");
+	}
+
+	return;
+}
+
+
 int answer_to_connection (void *cls, struct MHD_Connection *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
@@ -105,29 +391,230 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 {
 	str page = {NULL, 0};
 	struct MHD_Response *response;
-	int ret = 0;
+	int ret;
 	void *async_data = NULL;
 	struct httpd_cb *cb;
 	const char *normalised_url;
+	struct post_request *pr;
+	str_str_t *kv;
+	char *p;
+	int cnt_type = HTTPD_STD_CNT_TYPE;
+	int accept_type = HTTPD_STD_CNT_TYPE;
 
 	LM_DBG("START *** cls=%p, connection=%p, url=%s, method=%s, "
-		"versio=%s, upload_data[%d]=%p, con_cls=%p\n",
+			"versio=%s, upload_data[%zu]=%p, *con_cls=%p\n",
 			cls, connection, url, method, version,
-			(int)*upload_data_size, upload_data, con_cls);
+			*upload_data_size, upload_data, *con_cls);
 
-	cb = get_httpd_cb(url);
-	if (cb) {
-		normalised_url = &url[cb->http_root->len+1];
-		LM_DBG("normalised_url=[%s]\n", normalised_url);
-		cb->callback(cls, (void*)connection,
-				normalised_url,
-				method, version,
-				upload_data, upload_data_size, con_cls,
-				&buffer, &page);
-	} else {
-		page = MI_HTTP_U_URL;
+	pr = *con_cls;
+	if(pr == NULL){
+		pr = pkg_malloc(sizeof(struct post_request));
+		if(pr==NULL) {
+			LM_ERR("oom while allocating post_request structure\n");
+			return MHD_NO;
+		}
+		memset(pr, 0, sizeof(struct post_request));
+		*con_cls = pr;
+		pr = NULL;
 	}
 
+	if(strncmp(method, "POST", 4)==0) {
+		if(pr == NULL){
+			pr = *con_cls;
+			pr->p_list = slinkedl_init(&httpd_alloc, &httpd_free);
+			if (pr->p_list==NULL) {
+				LM_ERR("oom while allocating list\n");
+				return MHD_NO;
+			}
+			LM_DBG("running MHD_create_post_processor\n");
+			pr->pp = MHD_create_post_processor(connection,
+											post_buf_size,
+											&post_iterator,
+											pr);
+			if(pr->pp==NULL) {
+				if (*upload_data_size == 0) {
+					/* We need to wait for morte data before
+					 * handling the POST request */
+					return MHD_YES;
+				}
+				LM_DBG("NOT a regular POST :o)\n");
+				if (pr->content_type==0 && pr->content_len==0)
+					MHD_get_connection_values(connection, MHD_HEADER_KIND,
+											&getConnectionHeader, pr);
+				if (pr->content_type<=0 || pr->content_len<=0) {
+					LM_ERR("got a bogus request\n");
+					return MHD_NO;
+				}
+				if (*upload_data_size != pr->content_len) {
+					/* For now, we don't support large POST with truncated data */
+					LM_ERR("got a truncated POST request\n");
+					return MHD_NO;
+				}
+				LM_DBG("got ContentType [%d] with len [%d]: %.*s\\n",
+					pr->content_type, pr->content_len,
+					(int)*upload_data_size, upload_data);
+				/* Here we save data. */
+				switch (pr->content_type) {
+				case HTTPD_TEXT_XML_CNT_TYPE:
+				case HTTPD_APPLICATION_JSON_CNT_TYPE:
+					/* Save the entire body as 'body' */
+					kv = (str_str_t*)slinkedl_append(pr->p_list,
+							sizeof(str_str_t) + 1 +
+							*upload_data_size);
+					p = (char*)(kv + 1);
+					kv->key.len = 1; kv->key.s = p;
+					memcpy(p, "1", 1);
+					p += 1;
+					kv->val.len = *upload_data_size;
+					kv->val.s = p;
+					memcpy(p, upload_data, *upload_data_size);
+					break;
+				default:
+					LM_ERR("Unhandled data for ContentType [%d]\n",
+							pr->content_type);
+					return MHD_NO;
+				}
+				/* Mark the fact that we consumed all data */
+				*upload_data_size = 0;
+				return MHD_YES;
+			}
+
+			LM_DBG("pr=[%p] pp=[%p] p_list=[%p]\n",
+					pr, pr->pp, pr->p_list);
+			return MHD_YES;
+		} else {
+			if (pr->pp==NULL) {
+				if (*upload_data_size == 0) {
+					if (pr->content_type==HTTPD_TEXT_XML_CNT_TYPE)
+						cnt_type = HTTPD_TEXT_XML_CNT_TYPE;
+					if (pr->content_type==HTTPD_APPLICATION_JSON_CNT_TYPE)
+						cnt_type = HTTPD_APPLICATION_JSON_CNT_TYPE;
+					*con_cls = pr->p_list;
+					cb = get_httpd_cb(url);
+					if (cb) {
+						normalised_url = &url[cb->http_root->len+1];
+						LM_DBG("normalised_url=[%s]\n", normalised_url);
+						cb->callback(cls, (void*)connection,
+								normalised_url,
+								method, version,
+								upload_data, upload_data_size, con_cls,
+								&buffer, &page);
+					} else {
+						page = MI_HTTP_U_URL;
+					}
+					/* slinkedl_traverse(pr->p_list,
+							&httpd_print_data, NULL, NULL); */
+					slinkedl_list_destroy(*con_cls);
+					pkg_free(pr); *con_cls = pr = NULL;
+					goto send_response;
+				}
+				LM_DBG("NOT a regular POST :o)\n");
+				if (pr->content_type==0 && pr->content_len==0)
+					MHD_get_connection_values(connection, MHD_HEADER_KIND,
+											&getConnectionHeader, pr);
+				if (pr->content_type<=0 || pr->content_len<=0) {
+					LM_ERR("got a bogus request\n");
+					return MHD_NO;
+				}
+				if (*upload_data_size != pr->content_len) {
+					/* For now, we don't support large POST with truncated data */
+					LM_ERR("got a truncated POST request\n");
+					return MHD_NO;
+				}
+				LM_DBG("got ContentType [%d] with len [%d]: %.*s\\n",
+					pr->content_type, pr->content_len,
+					(int)*upload_data_size, upload_data);
+				/* Here we save data. */
+				switch (pr->content_type) {
+				case HTTPD_TEXT_XML_CNT_TYPE:
+				case HTTPD_APPLICATION_JSON_CNT_TYPE:
+					/* Save the entire body as 'body' */
+					kv = (str_str_t*)slinkedl_append(pr->p_list,
+							sizeof(str_str_t) + 1 +
+							*upload_data_size);
+					p = (char*)(kv + 1);
+					kv->key.len = 1; kv->key.s = p;
+					memcpy(p, "1", 1);
+					p += 1;
+					kv->val.len = *upload_data_size;
+					kv->val.s = p;
+					memcpy(p, upload_data, *upload_data_size);
+					break;
+				default:
+					LM_ERR("Unhandled data for ContentType [%d]\n",
+							pr->content_type);
+					return MHD_NO;
+				}
+				/* Mark the fact that we consumed all data */
+				*upload_data_size = 0;
+				return MHD_YES;
+			}
+			LM_DBG("running MHD_post_process: "
+					"pp=%p status=%d upload_data_size=%zu\n",
+					pr->pp, pr->status, *upload_data_size);
+			if (pr->status<0) {
+				slinkedl_list_destroy(pr->p_list);
+				pr->p_list = NULL;
+				/* FIXME:
+				 * It might be better to reply with an error
+				 * instead of resetting the connection via MHD_NO */
+				return MHD_NO;
+			}
+			ret =MHD_post_process(pr->pp, upload_data, *upload_data_size);
+			LM_DBG("ret=%d upload_data_size=%zu\n", ret, *upload_data_size);
+			if(*upload_data_size != 0) {
+				*upload_data_size = 0;
+				return MHD_YES;
+			}
+
+			LM_DBG("running MHD_destroy_post_processor: "
+					"pr=[%p] pp=[%p] p_list=[%p]\n",
+					pr, pr->pp, pr->p_list);
+			MHD_destroy_post_processor(pr->pp);
+			LM_DBG("done MHD_destroy_post_processor\n");
+			/* slinkedl_traverse(pr->p_list, &httpd_print_data, NULL, NULL); */
+			*con_cls = pr->p_list;
+
+			cb = get_httpd_cb(url);
+			if (cb) {
+				normalised_url = &url[cb->http_root->len+1];
+				LM_DBG("normalised_url=[%s]\n", normalised_url);
+				cb->callback(cls, (void*)connection,
+						normalised_url,
+						method, version,
+						upload_data, upload_data_size, con_cls,
+						&buffer, &page);
+			} else {
+				page = MI_HTTP_U_URL;
+			}
+			/* slinkedl_traverse(pr->p_list, &httpd_print_data, NULL, NULL); */
+			slinkedl_list_destroy(*con_cls);
+			pkg_free(pr); *con_cls = pr = NULL;
+		}
+	}else if(strncmp(method, "GET", 3)==0) {
+		pr = *con_cls;
+		MHD_get_connection_values(connection, MHD_HEADER_KIND,
+								&getConnectionHeader, pr);
+		accept_type = pr->accept_type;
+		pkg_free(pr); *con_cls = pr = NULL;
+		LM_DBG("accept_type=[%d]\n", accept_type);
+		cb = get_httpd_cb(url);
+		if (cb) {
+			normalised_url = &url[cb->http_root->len+1];
+			LM_DBG("normalised_url=[%s]\n", normalised_url);
+			cb->callback(cls, (void*)connection,
+					normalised_url,
+					method, version,
+					upload_data, upload_data_size, con_cls,
+					&buffer, &page);
+		} else {
+			page = MI_HTTP_U_URL;
+		}
+	}else{
+		page = MI_HTTP_U_METHOD;
+	}
+
+send_response:
 	if (page.s) {
 		LM_DBG("MHD_create_response_from_data [%p:%d]\n",
 			page.s, page.len);
@@ -142,8 +629,18 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 							(void*)async_data,
 							NULL);
 	}
+	if (cnt_type==HTTPD_TEXT_XML_CNT_TYPE || accept_type==HTTPD_TEXT_XML_CNT_TYPE)
+		MHD_add_response_header(response,
+								MHD_HTTP_HEADER_CONTENT_TYPE,
+								"text/xml; charset=utf-8");
+	if (cnt_type==HTTPD_APPLICATION_JSON_CNT_TYPE || accept_type==HTTPD_APPLICATION_JSON_CNT_TYPE)
+		MHD_add_response_header(response,
+								MHD_HTTP_HEADER_CONTENT_TYPE,
+								"application/json");
 	ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
 	MHD_destroy_response (response);
+
+
 
 	return ret;
 }
@@ -162,7 +659,7 @@ void httpd_proc(int rank)
 
 	/*child's initial settings*/
 	if (init_mi_child()!=0) {
-		LM_ERR("failed to init the mi process\n");
+		LM_ERR("failed to init the mi child process\n");
 		return;
 	}
 
@@ -224,7 +721,7 @@ void httpd_proc(int rank)
 			return;
 			break;
 		case EINTR:
-			LM_WARN("error returned by select: EINTR [%d] "
+			LM_DBG("failure returned by select: EINTR [%d] "
 				"(Non blocked signal caught)\n", status);
 			break;
 		case EINVAL:

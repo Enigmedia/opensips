@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -28,8 +28,8 @@
 /*!
  * \file
  * \brief SIP registrar module - lookup contacts in usrloc
- * \ingroup registrar  
- */  
+ * \ingroup registrar
+ */
 
 
 #include <string.h>
@@ -71,6 +71,7 @@ int lookup(struct sip_msg* _m, char* _t, char* _f, char* _s)
 	str path_dst;
 	str flags_s;
 	pv_value_t val;
+	int_str istr;
 	str sip_instance = {0,0},call_id = {0,0};
 
 	flags = 0;
@@ -134,7 +135,7 @@ search_valid_contact:
 	if (sip_instance.len && sip_instance.s) {
 		LM_DBG("ruri has gruu in lookup\n");
 		/* uri has GRUU */
-		if (ptr->instance.len-2 != sip_instance.len || 
+		if (ptr->instance.len-2 != sip_instance.len ||
 				memcmp(ptr->instance.s+1,sip_instance.s,sip_instance.len)) {
 			LM_DBG("no match to sip instace - [%.*s] - [%.*s]\n",ptr->instance.len-2,ptr->instance.s+1,
 					sip_instance.len,sip_instance.s);
@@ -224,6 +225,14 @@ search_valid_contact:
 		if (ptr->sock)
 			_m->force_send_socket = ptr->sock;
 
+		/* populate the 'attributes' avp */
+		if (attr_avp_name != -1) {
+			istr.s = ptr->attr;
+			if (add_avp_last(AVP_VAL_STR, attr_avp_name, istr) != 0) {
+				LM_ERR("Failed to populate attr avp!\n");
+			}
+		}
+
 		ptr = ptr->next;
 	}
 
@@ -236,13 +245,13 @@ search_valid_contact:
 	for( ; ptr ; ptr = ptr->next ) {
 		if (VALID_CONTACT(ptr, act_time) && allowed_method(_m,ptr,flags)) {
 			path_dst.len = 0;
-			if(ptr->path.s && ptr->path.len 
+			if(ptr->path.s && ptr->path.len
 			&& get_path_dst_uri(&ptr->path, &path_dst) < 0) {
 				LM_ERR("failed to get dst_uri for Path\n");
 				continue;
 			}
 
-			/* The same as for the first contact applies for branches 
+			/* The same as for the first contact applies for branches
 			 * regarding path vs. received. */
 			LM_DBG("setting branch <%.*s>\n",ptr->c.len,ptr->c.s);
 			if (append_branch(_m,&ptr->c,path_dst.len?&path_dst:&ptr->received,
@@ -251,11 +260,19 @@ search_valid_contact:
 				/* Also give a chance to the next branches*/
 				continue;
 			}
+
+			/* populate the 'attributes' avp */
+			if (attr_avp_name != -1) {
+				istr.s = ptr->attr;
+				if (add_avp_last(AVP_VAL_STR, attr_avp_name, istr) != 0) {
+					LM_ERR("Failed to populate attr avp!\n");
+				}
+			}
 		}
 	}
 
 done:
-	ul.release_urecord(r);
+	ul.release_urecord(r, 0);
 	ul.unlock_udomain((udomain_t*)_t, &aor);
 	return ret;
 }
@@ -274,6 +291,7 @@ int registered(struct sip_msg* _m, char* _t, char* _s, char *_c)
 	pv_value_t val;
 	str callid;
 	int res;
+	int_str istr;
 
 	/* get the AOR */
 	if (_s) {
@@ -334,6 +352,15 @@ int registered(struct sip_msg* _m, char* _t, char* _s, char *_c)
 		for( ; ptr ; ptr=ptr->next ) {
 			if (callid.len==0 || (callid.len==ptr->callid.len &&
 			memcmp(callid.s,ptr->callid.s,callid.len)==0 ) ) {
+
+				/* also populate the 'attributes' avp */
+				if (attr_avp_name != -1) {
+				    istr.s = ptr->attr;
+
+				    if (add_avp_last(AVP_VAL_STR, attr_avp_name, istr) != 0)
+				        LM_ERR("Failed to populate attr avp!\n");
+				}
+
 				ul.unlock_udomain((udomain_t*)_t, &aor);
 				LM_DBG("'%.*s' found in usrloc\n", aor.len, ZSW(aor.s));
 				return 1;

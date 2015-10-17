@@ -105,17 +105,31 @@ static inline int rl_set_name(str * name)
 static int rl_change_counter(str *name, rl_pipe_t *pipe, int c)
 {
 	int new_counter;
+	int ret;
 
 	if (rl_set_name(name) < 0)
 		return -1;
 
-	if (pipe->my_counter + c <= 0) {
+	if (pipe->my_counter + c < 0) {
 		LM_DBG("Counter going negative\n");
 		return 1;
 	}
 
-	if (cdbf.add(cdbc, &rl_name_buffer, c ? c : -(pipe->my_counter),
-				rl_expire_time, &new_counter) < 0){
+	if (c) {
+		if (c < 0)
+			ret = cdbf.sub(cdbc, &rl_name_buffer, -c, rl_expire_time, &new_counter);
+		else
+			ret = cdbf.add(cdbc, &rl_name_buffer, c, rl_expire_time, &new_counter);
+	} else {
+		if (pipe->my_counter) {
+			ret = cdbf.sub(cdbc, &rl_name_buffer, pipe->my_counter, rl_expire_time,
+					&new_counter);
+		} else {
+			ret = cdbf.get_counter(cdbc, &rl_name_buffer, &new_counter);
+		}
+	}
+
+	if (ret < 0) {
 		LM_ERR("cannot change counter for pipe %.*s with %d\n",
 				name->len, name->s, c);
 		return -1;
@@ -393,7 +407,7 @@ int w_rl_check_3(struct sip_msg *_m, char *_n, char *_l, char *_a)
 	LM_DBG("Pipe %.*s counter:%d load:%d limit:%d should %sbe blocked (%p)\n",
 			name.len, name.s, (*pipe)->counter, (*pipe)->load,
 			(*pipe)->limit, ret == 1? "NOT " : "", *pipe);
-	
+
 
 release:
 	RL_RELEASE_LOCK(hash_idx);
@@ -413,6 +427,7 @@ void rl_timer(unsigned int ticks, void *param)
 	map_iterator_t it, del;
 	rl_pipe_t **pipe;
 	str *key;
+	void *value;
 	unsigned long now = time(0);
 
 	/* get CPU load */
@@ -455,10 +470,8 @@ void rl_timer(unsigned int ticks, void *param)
 			if ((*pipe)->last_used + rl_expire_time < now) {
 				/* this pipe is engaged in a transaction */
 				del = it;
-				if (iterator_prev(&it) < 0) {
-					LM_DBG("cannot find previous iterator\n");
-					goto next_pipe;
-				}
+				if (iterator_next(&it) < 0)
+					LM_DBG("cannot find next iterator\n");
 				if ((*pipe)->algo == PIPE_ALGO_NETWORK) {
 					lock_get(rl_lock);
 					(*rl_network_count)--;
@@ -466,17 +479,16 @@ void rl_timer(unsigned int ticks, void *param)
 				}
 				LM_DBG("Deleting ratelimit pipe key \"%.*s\"\n",
 						key->len, key->s);
-				if (*pipe != iterator_delete(&del)) {
-					LM_ERR("error while deleting key\n");
-				}
+				value = iterator_delete(&del);
 				/* free resources */
-				shm_free(*pipe);
+				if (value)
+					shm_free(value);
+				continue;
 			} else {
 				/* leave the lock if a cachedb query should be done*/
 				if (RL_USE_CDB(*pipe)) {
 					if (rl_get_counter(key, *pipe) < 0) {
 						LM_ERR("cannot get pipe counter\n");
-						RL_GET_LOCK(i);
 						goto next_pipe;
 					}
 				}
@@ -486,7 +498,7 @@ void rl_timer(unsigned int ticks, void *param)
 						(*pipe)->load =
 							(*rl_network_load > (*pipe)->limit) ? -1 : 1;
 						break;
-				
+
 					case PIPE_ALGO_RED:
 						if ((*pipe)->limit && rl_timer_interval)
 							(*pipe)->load = (*pipe)->counter /
@@ -499,7 +511,6 @@ void rl_timer(unsigned int ticks, void *param)
 				if (RL_USE_CDB(*pipe)) {
 					if (rl_change_counter(key, *pipe, 0) < 0) {
 						LM_ERR("cannot reset counter\n");
-						RL_GET_LOCK(i);
 					}
 				} else {
 					(*pipe)->counter = 0;

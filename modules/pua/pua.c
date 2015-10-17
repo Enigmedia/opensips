@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -98,7 +98,7 @@ static int mod_init(void);
 static int child_init(int);
 static void destroy(void);
 
-static int update_pua(ua_pres_t* p, unsigned int hash_code);
+static int update_pua(ua_pres_t* p, unsigned int hash_code, unsigned int final);
 
 static int db_restore(void);
 static void db_update(unsigned int ticks,void *param);
@@ -332,13 +332,13 @@ static int db_restore(void)
 		LM_ERR("null database connection\n");
 		return -1;
 	}
-	
+
 	if(pua_dbf.use_table(pua_db, &db_table)< 0)
 	{
 		LM_ERR("in use table\n");
 		return -1;
 	}
-	
+
 	if (DB_CAPABILITY(pua_dbf, DB_CAP_FETCH)) {
 		if(pua_dbf.query(pua_db,0, 0, 0, result_cols,0, n_result_cols, 0,0)< 0)
 		{
@@ -432,24 +432,24 @@ static int db_restore(void)
 				LM_DBG("to_uri= %.*s\n", to_uri.len, to_uri.s);
 				call_id.s= (char*)row_vals[callid_col].val.string_val;
 				call_id.len = strlen(call_id.s);
-				
+
 				to_tag.s= (char*)row_vals[totag_col].val.string_val;
 				to_tag.len = strlen(to_tag.s);
-				
+
 				from_tag.s= (char*)row_vals[fromtag_col].val.string_val;
 				from_tag.len = strlen(from_tag.s);
-				
+
 				if(row_vals[record_route_col].val.string_val)
 				{
 					record_route.s= (char*)
 						row_vals[record_route_col].val.string_val;
 					record_route.len= strlen(record_route.s);
 				}
-				
+
 				contact.s= (char*)row_vals[contact_col].val.string_val;
 				contact.len = strlen(contact.s);
-				
-				remote_contact.s= 
+
+				remote_contact.s=
 					(char*)row_vals[remote_contact_col].val.string_val;
 				if(remote_contact.s)
 					remote_contact.len = strlen(remote_contact.s);
@@ -462,13 +462,11 @@ static int db_restore(void)
 
 			size= sizeof(ua_pres_t)+ sizeof(str)+ (pres_uri.len+ pres_id.len+
 						tuple_id.len)* sizeof(char);
-			if(extra_headers.s)
-					size+= sizeof(str)+ extra_headers.len* sizeof(char);
 
 			if(watcher_uri.s)
 				size+= sizeof(str)+ to_uri.len + watcher_uri.len+ call_id.len+ to_tag.len+
 					from_tag.len+ record_route.len+ contact.len;
-			
+
 			p= (ua_pres_t*)shm_malloc(size);
 			if(p== NULL)
 			{
@@ -477,14 +475,14 @@ static int db_restore(void)
 			}
 			memset(p, 0, size);
 			size= sizeof(ua_pres_t);
-			
+
 			p->pres_uri= (str*)((char*)p+ size);
 			size+= sizeof(str);
 			p->pres_uri->s= (char*)p + size;
 			memcpy(p->pres_uri->s, pres_uri.s, pres_uri.len);
 			p->pres_uri->len= pres_uri.len;
 			size+= pres_uri.len;
-			
+
 			if(pres_id.s)
 			{
 				CONT_COPY(p, p->id, pres_id);
@@ -525,16 +523,6 @@ static int db_restore(void)
 				p->version= row_vals[version_col].val.int_val;
 			}
 
-			if(extra_headers.s)
-			{
-				p->extra_headers= (str*)((char*)p+ size);
-				size+= sizeof(str);
-				p->extra_headers->s= (char*)p+ size;
-				memcpy(p->extra_headers->s, extra_headers.s, extra_headers.len);
-				p->extra_headers->len= extra_headers.len;
-				size+= extra_headers.len;
-			}
-
 			LM_DBG("size= %d\n", size);
 			p->event= row_vals[event_col].val.int_val;
 			p->expires= row_vals[expires_col].val.int_val;
@@ -550,9 +538,23 @@ static int db_restore(void)
 				{
 					LM_ERR("no more share memory\n");
 					goto error;
-				}	
+				}
 				memcpy(p->etag.s, etag.s, etag.len);
 				p->etag.len= etag.len;
+			}
+
+			memset(&p->extra_headers, 0, sizeof(str));
+			if(extra_headers.s && extra_headers.len)
+			{
+				/* alloc separately */
+				p->extra_headers.s= (char*)shm_malloc(extra_headers.len);
+				if(p->extra_headers.s==  NULL)
+				{
+					LM_ERR("no more share memory\n");
+					goto error;
+				}
+				memcpy(p->extra_headers.s, extra_headers.s, extra_headers.len);
+				p->extra_headers.len= extra_headers.len;
 			}
 
 			print_ua_pres(p);
@@ -571,7 +573,7 @@ static int db_restore(void)
 
 	pua_dbf.free_result(pua_db, res);
 	res = NULL;
-	
+
 	if(pua_dbf.delete(pua_db, 0, 0 , 0, 0) < 0)
 	{
 		LM_ERR("while deleting information from db\n");
@@ -585,7 +587,12 @@ error:
 		pua_dbf.free_result(pua_db, res);
 
 	if(p)
+	{
+		if(p->remote_contact.s) shm_free(p->remote_contact.s);
+		if(p->extra_headers.s) shm_free(p->extra_headers.s);
+		if(p->etag.s) shm_free(p->etag.s);
 		shm_free(p);
+	}
 	return -1;
 }
 
@@ -606,14 +613,14 @@ static void hashT_clean(unsigned int ticks,void *param)
 			LM_DBG("---\n");
 			if(p->expires -update_period < now )
 			{
-				if((p->desired_expires> p->expires + 5) || 
+				if((p->desired_expires> p->expires + 5) ||
 						(p->desired_expires== 0 ))
 				{
 					LM_DBG("Desired expires greater than expires -> send a "
 						"refresh PUBLISH desired_expires=%d - expires=%d\n",
 						p->desired_expires, p->expires);
 
-					if(update_pua(p, i)< 0)
+					if(update_pua(p, i, 0)< 0)
 					{
 						LM_ERR("while updating record\n");
 						lock_release(&HashT->p_records[i].lock);
@@ -625,6 +632,10 @@ static void hashT_clean(unsigned int ticks,void *param)
 
 				LM_DBG("Found expired: uri= %.*s\n", p->pres_uri->len,
 						p->pres_uri->s);
+				if(update_pua(p, i, 1)< 0)
+				{
+					LM_ERR("while updating record\n");
+				}
 				/* delete it */
 				q = p->next;
 				delete_htable_safe(p, p->hash_index);
@@ -637,20 +648,27 @@ static void hashT_clean(unsigned int ticks,void *param)
 	}
 }
 
-int update_pua(ua_pres_t* p, unsigned int hash_code)
+int update_pua(ua_pres_t* p, unsigned int hash_code, unsigned int final)
 {
 	str* str_hdr= NULL;
 	int expires;
 	int result;
-	
-	if(p->desired_expires== 0)
-		expires= 3600;
+
+	if(final > 0)
+	{
+		expires= 0;
+		p->desired_expires= 0;
+	}
 	else
-		expires= p->desired_expires- (int)time(NULL);
+	{
+		if(p->desired_expires== 0)
+			expires= 3600;
+		else
+			expires= p->desired_expires- (int)time(NULL);
 
-	if(expires < min_expires)
-		expires = min_expires;
-
+		if(expires < min_expires)
+			expires = min_expires;
+	}
 	if(p->watcher_uri== NULL)
 	{
 		str met= {"PUBLISH", 7};
@@ -665,13 +683,13 @@ int update_pua(ua_pres_t* p, unsigned int hash_code)
 		}
 
 		str_hdr = publ_build_hdr(expires, ev, NULL,
-				&p->etag, p->extra_headers, 0);
+				&p->etag, &p->extra_headers, 0);
 		if(str_hdr == NULL)
 		{
 			LM_ERR("while building extra_headers\n");
 			goto error;
 		}
-		LM_DBG("str_hdr:\n%.*s\n ", str_hdr->len, str_hdr->s);
+		LM_DBG("str_hdr:\n%.*s expires:%d\n ", str_hdr->len, str_hdr->s, expires);
 
 		cb_param = PRES_HASH_ID(p);
 
@@ -700,7 +718,7 @@ int update_pua(ua_pres_t* p, unsigned int hash_code)
 			goto error;
 		}
 		LM_DBG("td->rem_uri= %.*s\n", td->rem_uri.len, td->rem_uri.s);
-		str_hdr= subs_build_hdr(&p->contact, expires,p->event,p->extra_headers);
+		str_hdr= subs_build_hdr(&p->contact, expires,p->event,&p->extra_headers);
 		if(str_hdr== NULL || str_hdr->s== NULL)
 		{
 			LM_ERR("while building extra headers\n");
@@ -733,7 +751,7 @@ int update_pua(ua_pres_t* p, unsigned int hash_code)
 
 		pkg_free(td);
 		td= NULL;
-	}	
+	}
 
 	pkg_free(str_hdr);
 	return 0;
@@ -742,15 +760,15 @@ error:
 	if(str_hdr)
 		pkg_free(str_hdr);
 	return -1;
-
 }
 
 static void db_update(unsigned int ticks,void *param)
 {
 	ua_pres_t* p= NULL;
-	db_key_t q_cols[20];
+	db_key_t q_cols[19];
+	db_val_t q_vals[19];
 	db_key_t db_cols[5];
-	db_val_t q_vals[21], db_vals[5];
+	db_val_t db_vals[5];
 	db_op_t  db_ops[1] ;
 	int n_query_cols= 0, n_query_update= 0;
 	int n_update_cols= 0;
@@ -768,7 +786,7 @@ static void db_update(unsigned int ticks,void *param)
 	q_vals[puri_col].type = DB_STR;
 	q_vals[puri_col].nul = 0;
 	n_query_cols++;
-	
+
 	q_cols[pid_col= n_query_cols] = &str_pres_id_col;
 	q_vals[pid_col].type = DB_STR;
 	q_vals[pid_col].nul = 0;
@@ -877,6 +895,10 @@ static void db_update(unsigned int ticks,void *param)
 	db_vals[3].type = DB_INT;
 	db_vals[3].nul = 0;
 
+	db_cols[4]= &str_extra_headers_col;
+	db_vals[4].type = DB_STR;
+	db_vals[4].nul = 0;
+
 	if(pua_db== NULL)
 	{
 		LM_ERR("null database connection\n");
@@ -887,13 +909,6 @@ static void db_update(unsigned int ticks,void *param)
 	{
 		LM_ERR("in use table\n");
 		return ;
-	}
-
-	db_vals[0].val.int_val= (int)time(NULL)- 10;
-	db_ops[0]= OP_LT;
-	if(pua_dbf.delete(pua_db, db_cols, db_ops, db_vals, 1) < 0)
-	{
-		LM_ERR("while deleting from db table pua\n");
 	}
 
 	for(i=0; i<HASH_SIZE; i++) 
@@ -945,7 +960,17 @@ static void db_update(unsigned int ticks,void *param)
 					db_vals[1].val.int_val= p->cseq;
 					db_vals[2].val.str_val= p->etag;
 					db_vals[3].val.int_val= p->desired_expires;
-					n_update_cols= 4;
+					if(p->extra_headers.s && p->extra_headers.len)
+					{
+						db_vals[4].val.str_val= p->extra_headers;
+						n_update_cols= 5;
+					}
+					else
+					{
+						db_vals[4].val.str_val.s= NULL;
+						db_vals[4].val.str_val.len= 0;
+						n_update_cols= 4;
+					}
 
 					LM_DBG("Updating:n_query_update= %d\tn_update_cols= %d\n",
 							n_query_update, n_update_cols);
@@ -986,11 +1011,7 @@ static void db_update(unsigned int ticks,void *param)
 					q_vals[record_route_col].val.str_val = p->record_route;
 					q_vals[contact_col].val.str_val = p->contact;
 					q_vals[remote_contact_col].val.str_val = p->remote_contact;
-
-					if(p->extra_headers)
-						q_vals[extra_headers_col].val.str_val = *(p->extra_headers);
-					else
-						memset(&q_vals[extra_headers_col].val.str_val, 0, sizeof(str));
+					q_vals[extra_headers_col].val.str_val = p->extra_headers;
 
 					if(pua_dbf.insert(pua_db, q_cols, q_vals, n_query_cols)< 0)
 					{
@@ -1008,6 +1029,13 @@ static void db_update(unsigned int ticks,void *param)
 		}
 		if(!no_lock)
 			lock_release(&HashT->p_records[i].lock);
+	}
+
+	db_vals[0].val.int_val= (int)time(NULL)- 10;
+	db_ops[0]= OP_LT;
+	if(pua_dbf.delete(pua_db, db_cols, db_ops, db_vals, 1) < 0)
+	{
+		LM_ERR("while deleting from db table pua\n");
 	}
 
 	return ;

@@ -1,7 +1,7 @@
 /*
  * $Id$
  *
- * Copyright (C) 2011-2012 VoIP Embedded Inc.
+ * Copyright (C) 2011-2013 VoIP Embedded Inc.
  *
  * This file is part of Open SIP Server (opensips).
  *
@@ -47,6 +47,7 @@ void mi_http_answer_to_connection (void *cls, void *connection,
 static ssize_t mi_http_flush_data(void *cls, uint64_t pos, char *buf, size_t max);
 
 str http_root = str_init("mi");
+int http_method = 0;
 
 httpd_api_t httpd_api;
 
@@ -61,7 +62,8 @@ static const str MI_HTTP_U_METHOD = str_init("<html><body>"
 
 /* module parameters */
 static param_export_t mi_params[] = {
-	{"mi_http_root",		STR_PARAM, &http_root.s},
+	{"mi_http_root",   STR_PARAM, &http_root.s},
+	{"mi_http_method", INT_PARAM, &http_method},
 	{0,0,0}
 };
 
@@ -100,6 +102,10 @@ static int mod_init(void)
 {
 	http_root.len = strlen(http_root.s);
 
+	if (http_method<0 || http_method>1) {
+		LM_ERR("mi_http_method can be between [0,1]\n");
+		return -1;
+	}
 	/* Load httpd api */
 	if(load_httpd_api(&httpd_api)<0) {
 		LM_ERR("Failed to load httpd api\n");
@@ -193,20 +199,20 @@ void mi_http_answer_to_connection (void *cls, void *connection,
 {
 	int mod = -1;
 	int cmd = -1;
-	const char *url_args;
+	str arg = {NULL, 0};
 	struct mi_root *tree = NULL;
 	struct mi_handler *async_hdl;
 
 	LM_DBG("START *** cls=%p, connection=%p, url=%s, method=%s, "
-		"versio=%s, upload_data[%d]=%p, con_cls=%p\n",
+		"versio=%s, upload_data[%d]=%p, *con_cls=%p\n",
 			cls, connection, url, method, version,
-			(int)*upload_data_size, upload_data, con_cls);
-	if (strncmp(method, "GET", 3)==0) {
+			(int)*upload_data_size, upload_data, *con_cls);
+	if (strncmp(method, "GET", 3)==0 || strncmp(method, "POST", 4)==0) {
 		if(0 == mi_http_parse_url(url, &mod, &cmd)) {
-			url_args = httpd_api.lookup_arg(connection, "arg");
-			LM_DBG("url_args [%p]->[%s]\n", url_args, url_args);
-			if (mod>=0 && cmd>=0 && url_args) {
-				tree = mi_http_run_mi_cmd(mod, cmd, url_args,
+			httpd_api.lookup_arg(connection, "arg", *con_cls, &arg);
+			if (mod>=0 && cmd>=0 && arg.s) {
+				LM_DBG("arg [%p]->[%.*s]\n", arg.s, arg.len, arg.s);
+				tree = mi_http_run_mi_cmd(mod, cmd, &arg,
 							page, buffer, &async_hdl);
 				if (tree == NULL) {
 					LM_ERR("no reply\n");
@@ -220,9 +226,9 @@ void mi_http_answer_to_connection (void *cls, void *connection,
 					if(0!=mi_http_build_page(page, buffer->len,
 								mod, cmd, tree)){
 						LM_ERR("unable to build response "
-							"for cmd [%d] w/ args [%s]\n",
+							"for cmd [%d] w/ args [%.*s]\n",
 							cmd,
-							url_args);
+							arg.len, arg.s);
 						*page = MI_HTTP_U_ERROR;
 					}
 				}

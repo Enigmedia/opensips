@@ -1,5 +1,5 @@
-/* 
- * $Id$ 
+/*
+ * $Id$
  *
  * UNIXODBC module row related functions
  *
@@ -18,8 +18,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *
@@ -35,11 +35,16 @@
 #include "../../db/db_res.h"
 #include "../../db/db_row.h"
 
+#include "con.h"
+
+/*
+ * Duplicate result columns in pkg memory, stack them linearly
+ */
+str *db_unixodbc_dup_row(strn *in, int row, int columns);
 
 /*
  * Convert a row from result into db API representation
  */
-int db_unixodbc_convert_row(const db_con_t* _h, const db_res_t* _res, db_row_t* _r,
-		const unsigned long* lengths);
+int db_unixodbc_convert_row(const str *row, const db_res_t *_res, db_row_t *_r);
 
 #endif /* ROW_H */

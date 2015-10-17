@@ -61,7 +61,6 @@ static str domain_col      = str_init("domain");
 static str* db_columns[6] = {&uuid_col, &attribute_col, &value_col,
                              &type_col, &username_col, &domain_col};
 
-static struct db_url* default_db_url = NULL;
 unsigned buf_size=1024;
 
 static int avpops_init(void);
@@ -82,7 +81,7 @@ static int fixup_insert_avp(void** param, int param_no);
 
 static int w_print_avps(struct sip_msg* msg, char* foo, char *bar);
 static int w_dbload_avps(struct sip_msg* msg, char* source,
-		char* param, char* url);
+		char* param, char *url, char *prefix);
 static int w_dbdelete_avps(struct sip_msg* msg, char* source,
 		char* param, char* url);
 static int w_dbstore_avps(struct sip_msg* msg, char* source,
@@ -108,6 +107,9 @@ static cmd_export_t cmds[] = {
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
 		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"avp_db_load", (cmd_function)w_dbload_avps,  3, fixup_db_load_avp, 0,
+		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
+		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
+	{"avp_db_load", (cmd_function)w_dbload_avps,  4, fixup_db_load_avp, 0,
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
 		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"avp_db_delete", (cmd_function)w_dbdelete_avps, 2, fixup_db_delete_avp, 0,
@@ -209,11 +211,11 @@ static int avpops_init(void)
 	username_col.len = strlen(username_col.s);
 	domain_col.len = strlen(domain_col.s);
 
+	default_db_url = get_default_db_url();
+
 	/* bind to the DB module */
 	if (avpops_db_bind()<0)
 		goto error;
-
-	default_db_url = get_default_db_url();
 
 	init_store_avps(db_columns);
 
@@ -239,7 +241,7 @@ static int avpops_child_init(int rank)
 }
 
 
-static int fixup_db_url(void ** param)
+static int fixup_db_url(void ** param, int flags)
 {
 	struct db_url* url;
 	unsigned int ui;
@@ -258,11 +260,57 @@ static int fixup_db_url(void ** param)
 		LM_ERR("no db_url with id <%s>\n", (char *)(*param));
 		return E_CFG;
 	}
+
+	url->flags |= flags;
+
 	pkg_free(*param);
 	*param=(void *)url;
 	return 0;
 }
 
+/* parse the name avp again when adding an avp name prefix (param 4) */
+struct db_param *dbp_fixup;
+
+static int fixup_avp_prefix(void **param)
+{
+	str st, *name, *prefix;
+	char *p;
+
+	prefix = pkg_malloc(sizeof(*prefix));
+	if (!prefix) {
+		LM_ERR("No more pkg\n");
+		return -1;
+	}
+
+	prefix->s = (char *)*param;
+	prefix->len = strlen(prefix->s);
+
+	name = get_avp_name_id(dbp_fixup->a.u.sval.pvp.pvn.u.isname.name.n);
+
+	if (name && dbp_fixup->a.type == AVPOPS_VAL_PVAR) {
+
+		p = pkg_malloc(name->len + prefix->len + 7);
+		if (!p) {
+			LM_ERR("No more pkg mem!\n");
+			return -1;
+		}
+
+		memcpy(p, "$avp(", 5);
+		memcpy(p + 5, prefix->s, prefix->len);
+		memcpy(p + 5 + prefix->len, name->s, name->len);
+		p[name->len + prefix->len + 5] = ')';
+		p[name->len + prefix->len + 6] = '\0';
+
+		st.s = p;
+		st.len = prefix->len + name->len + 6;
+
+		pv_parse_spec(&st, &dbp_fixup->a.u.sval);
+	}
+
+	*param = prefix;
+
+	return 0;
+}
 
 static int fixup_db_avp(void** param, int param_no, int allow_scheme)
 {
@@ -329,7 +377,7 @@ static int fixup_db_avp(void** param, int param_no, int allow_scheme)
 					"expected : $pseudo-variable or int/str value\n");
 				return E_UNSPEC;
 			}
-			
+
 			if(sp->u.sval.type==PVT_RURI || sp->u.sval.type==PVT_FROM
 					|| sp->u.sval.type==PVT_TO || sp->u.sval.type==PVT_OURI)
 			{
@@ -353,9 +401,13 @@ static int fixup_db_avp(void** param, int param_no, int allow_scheme)
 			LM_ERR("parse failed\n");
 			return E_UNSPEC;
 		}
+
+		dbp_fixup = dbp;
 		*param=(void*)dbp;
 	} else if (param_no==3) {
-		return fixup_db_url(param);
+		return fixup_db_url(param, 0);
+	} else if (param_no==4) {
+		return fixup_avp_prefix(param);
 	}
 
 	return 0;
@@ -404,7 +456,7 @@ static int fixup_db_query_avp(void** param, int param_no)
 			LM_ERR("wrong format[%s]\n", s.s);
 			return E_UNSPEC;
 		}
-			
+
 		*param = (void*)model;
 		return 0;
 	} else if(param_no==2) {
@@ -423,7 +475,7 @@ static int fixup_db_query_avp(void** param, int param_no)
 		*param = (void*)anlist;
 		return 0;
 	} else if (param_no==3) {
-		return fixup_db_url(param);
+		return fixup_db_url(param, DBFL_CAP_RAW_QUERY);
 	}
 
 	return 0;
@@ -443,7 +495,7 @@ static int fixup_delete_avp(void** param, int param_no)
 		/* attribute name / alias */
 		if ( (p=strchr(s,'/'))!=0 )
 			*(p++)=0;
-		
+
 		if(*s=='$')
 		{
 			/* is variable */
@@ -647,7 +699,7 @@ static int fixup_pushto_avp(void** param, int param_no)
 			break;
 			case PVT_HDR:
 				/* what's the hdr destination ? request or reply? */
-				LM_ERR("push to header  is obsoleted - use append_hf() "
+				LM_ERR("push to header is obsolete - use append_hf() "
 						"or append_to_reply() from textops module!\n");
 				return E_UNSPEC;
 			break;
@@ -786,7 +838,7 @@ static int fixup_subst(void** param, int param_no)
 	struct fis_param **av;
 	char *s;
 	char *p;
-	
+
 	if (param_no==1) {
 		s = (char*)*param;
 		ap = 0;
@@ -795,7 +847,7 @@ static int fixup_subst(void** param, int param_no)
 		if(av==NULL)
 		{
 			LM_ERR("no more pkg memory\n");
-			return E_UNSPEC;			
+			return E_UNSPEC;
 		}
 		memset(av, 0, 2*sizeof(struct fis_param*));
 
@@ -826,7 +878,7 @@ static int fixup_subst(void** param, int param_no)
 			*param=(void*)av;
 			return 0;
 		}
-		
+
 		/* dst || flags */
 		s = p;
 		if(*s==PV_MARKER)
@@ -841,7 +893,7 @@ static int fixup_subst(void** param, int param_no)
 					LM_ERR("unable to get pseudo-variable in param 2 [%s]\n",s);
 					return E_OUT_OF_MEM;
 				}
-			
+
 				if (ap->u.sval.type!=PVT_AVP)
 				{
 					LM_ERR("bad attribute name <%s>!\n", s);
@@ -862,7 +914,7 @@ static int fixup_subst(void** param, int param_no)
 				return 0;
 			}
 		}
-		
+
 		/* flags */
 		for( ; p&&*p ; p++ )
 		{
@@ -915,7 +967,7 @@ static int fixup_op_avp(void** param, int param_no)
 		if(av==NULL)
 		{
 			LM_ERR("no more pkg memory\n");
-			return E_UNSPEC;			
+			return E_UNSPEC;
 		}
 		memset(av, 0, 2*sizeof(struct fis_param*));
 		/* avp src / avp dst */
@@ -939,7 +991,7 @@ static int fixup_op_avp(void** param, int param_no)
 			*param=(void*)av;
 			return 0;
 		}
-		
+
 		s = p;
 		ap = avpops_parse_pvar(s);
 		if (ap==0)
@@ -979,20 +1031,20 @@ static int fixup_is_avp_set(void** param, int param_no)
 	struct fis_param *ap;
 	char *p;
 	char *s;
-	
+
 	s = (char*)(*param);
 	if (param_no==1) {
 		/* attribute name | alias / flags */
 		if ( (p=strchr(s,'/'))!=0 )
 			*(p++)=0;
-		
+
 		ap = avpops_parse_pvar(s);
 		if (ap==0)
 		{
 			LM_ERR("unable to get pseudo-variable in param\n");
 			return E_OUT_OF_MEM;
 		}
-		
+
 		if (ap->u.sval.type!=PVT_AVP)
 		{
 			LM_ERR("bad attribute name <%s>\n", (char*)*param);
@@ -1032,7 +1084,7 @@ static int fixup_is_avp_set(void** param, int param_no)
 					return E_UNSPEC;
 			}
 		}
-		
+
 		*param=(void*)ap;
 	}
 
@@ -1096,16 +1148,16 @@ static int fixup_insert_avp(void** param, int param_no)
 
 
 static int w_dbload_avps(struct sip_msg* msg, char* source,
-													char* param, char *url)
+										char* param, char *url, char *prefix)
 {
 	return ops_dbload_avps ( msg, (struct fis_param*)source,
 		(struct db_param*)param,
 		url?(struct db_url*)url:default_db_url,
-		use_domain);
+		use_domain, (str *)prefix);
 }
 
 static int w_dbdelete_avps(struct sip_msg* msg, char* source,
-													char* param, char *url)
+										char* param, char *url)
 {
 	return ops_dbdelete_avps ( msg, (struct fis_param*)source,
 		(struct db_param*)param,
