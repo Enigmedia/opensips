@@ -1,5 +1,5 @@
 /*
- * $Id$
+ * $Id: imc.h 5901 2009-07-21 07:45:05Z bogdan_iancu $
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -32,6 +32,7 @@
 
 extern str imc_cmd_start_str;
 extern char imc_cmd_start_char;
+extern int imc_db_mode;
 extern struct tm_binds tmb;
 extern str outbound_proxy;
 

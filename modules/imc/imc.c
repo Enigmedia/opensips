@@ -1,5 +1,5 @@
 /*
- * $Id$
+ * $Id: imc.c 8628 2011-12-19 14:20:30Z bogdan_iancu $
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -63,15 +63,16 @@ db_con_t *imc_db = NULL;
 db_func_t imc_dbf;
 static str db_url  = {NULL, 0};
 str outbound_proxy = {NULL, 0};
+int imc_db_mode;
 
-static str rooms_table   = str_init("imc_rooms");
-static str members_table = str_init("imc_members");
+str rooms_table   = str_init("imc_rooms");
+str members_table = str_init("imc_members");
 
-static str imc_col_username = str_init("username");
-static str imc_col_domain   = str_init("domain");
-static str imc_col_flag     = str_init("flag");
-static str imc_col_room     = str_init("room");
-static str imc_col_name     = str_init("name");
+str imc_col_username = str_init("username");
+str imc_col_domain   = str_init("domain");
+str imc_col_flag     = str_init("flag");
+str imc_col_room     = str_init("room");
+str imc_col_name     = str_init("name");
 
 imc_hentry_p _imc_htable = NULL;
 int imc_hash_size = 4;
@@ -86,6 +87,11 @@ static int imc_manager(struct sip_msg*, char *, char *);
 
 static struct mi_root* imc_mi_list_rooms(struct mi_root* cmd, void* param);
 static struct mi_root* imc_mi_list_members(struct mi_root* cmd, void* param);
+
+#define DB_MODE_NONE				0
+#define DB_MODE_REALTIME			1
+#define DB_MODE_DELAYED				2
+#define DB_MODE_SHUTDOWN			3
 
 void destroy(void);
 
@@ -108,6 +114,7 @@ static param_export_t params[]={
 	{"rooms_table",			STR_PARAM, &rooms_table.s},
 	{"members_table",		STR_PARAM, &members_table.s},
 	{"outbound_proxy",		STR_PARAM, &outbound_proxy.s},
+	{"db_mode",             INT_PARAM, &imc_db_mode},
 	{0,0,0}
 };
 
@@ -222,7 +229,8 @@ int add_from_db(void)
 		{
 			LM_ERR("failed to add room\n ");
 			goto error;
-		}	
+		}
+		room->database_op = IMC_DATABASE_NOT_TO_SAVE;
 	
 		/* add members */
 		if(imc_dbf.use_table(imc_db, &members_table)< 0)
@@ -269,6 +277,7 @@ int add_from_db(void)
 				LM_ERR("failed to adding member\n ");
 				goto error;
 			}
+			member->database_op = IMC_DATABASE_NOT_TO_SAVE;
 			imc_release_room(room);	
 		}
 
@@ -279,6 +288,7 @@ int add_from_db(void)
 		}
 	}
 
+	/*
 	if(imc_dbf.use_table(imc_db, &members_table)< 0)
 	{
 		LM_ERR("use table failed\n ");
@@ -302,6 +312,7 @@ int add_from_db(void)
 		LM_ERR("failed to delete information from db\n");
 		goto error;
 	}
+	*/
 
 	if(r_res)
 	{	
@@ -435,10 +446,159 @@ static int child_init(int rank)
 }
 
 
+void save_db(void)
+{
+	LM_DBG("save_db\n");
+	imc_room_p irp = NULL;
+	imc_member_p member = NULL;
+	int i;
+	db_key_t mq_cols[4];
+	db_val_t mq_vals[4];
+	db_key_t rq_cols[4];
+	db_val_t rq_vals[4];
+
+	mq_cols[0] = &imc_col_username;
+	mq_vals[0].type = DB_STR;
+	mq_vals[0].nul = 0;
+
+	mq_cols[1] = &imc_col_domain;
+	mq_vals[1].type = DB_STR;
+	mq_vals[1].nul = 0;
+
+	mq_cols[2] = &imc_col_flag;
+	mq_vals[2].type = DB_INT;
+	mq_vals[2].nul = 0;
+
+	mq_cols[3] = &imc_col_room;
+	mq_vals[3].type = DB_STR;
+	mq_vals[3].nul = 0;
+
+
+	rq_cols[0] = &imc_col_name;
+	rq_vals[0].type = DB_STR;
+	rq_vals[0].nul = 0;
+
+	rq_cols[1] = &imc_col_domain;
+	rq_vals[1].type = DB_STR;
+	rq_vals[1].nul = 0;
+
+	rq_cols[2] = &imc_col_flag;
+	rq_vals[2].type = DB_INT;
+	rq_vals[2].nul = 0;
+
+	for(i=0; i<imc_hash_size; i++)
+	{
+		irp = _imc_htable[i].rooms;
+
+		while(irp)
+		{
+			if(irp->database_op==IMC_DATABASE_TO_SAVE)
+			{
+				rq_vals[0].val.str_val = irp->name;
+				rq_vals[1].val.str_val = irp->domain;
+				rq_vals[2].val.int_val = irp->flags;
+
+				if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
+				{
+					LM_ERR("use_table failed\n");
+					return;
+				}
+
+				if(imc_dbf.insert(imc_db, rq_cols, rq_vals, 3)<0)
+				{
+					LM_WARN("failed to insert into table %s, room %d %.*s (maybe the value already was, don't panic...) \n", rooms_table.s, i, irp->name.len, irp->name.s);
+					//return;
+				}
+				else
+				{
+					irp->database_op = IMC_DATABASE_NOT_TO_SAVE;
+					LM_DBG("inserted into table %s, room %d %.*s\n", rooms_table.s, i, irp->name.len, irp->name.s);
+				}
+			}
+			else
+			{
+				LM_DBG("already inserted into table %s, room %d %.*s\n", rooms_table.s, i, irp->name.len, irp->name.s);
+			}
+			member = irp->members;
+			while(member)
+			{
+				if(member->database_op == IMC_DATABASE_TO_SAVE || member->database_op == IMC_DATABASE_TO_UPDATE)
+				{
+					if(imc_dbf.use_table(imc_db, &members_table)< 0)
+					{
+						LM_ERR("use_table failed\n");
+						return;
+					}
+
+					if(member->database_op == IMC_DATABASE_TO_UPDATE)
+					{
+						db_key_t mq2_cols[3];
+						db_val_t mq2_vals[3];
+
+						mq2_cols[0] = &imc_col_username;
+						mq2_vals[0].type = DB_STR;
+						mq2_vals[0].nul = 0;
+
+						mq2_cols[1] = &imc_col_domain;
+						mq2_vals[1].type = DB_STR;
+						mq2_vals[1].nul = 0;
+
+						mq2_cols[2] = &imc_col_room;
+						mq2_vals[2].type = DB_STR;
+						mq2_vals[2].nul = 0;
+
+
+						LM_DBG("updating member (=delete first)");
+						mq2_vals[0].val.str_val = member->user;
+						mq2_vals[1].val.str_val = member->domain;
+						mq2_vals[2].val.str_val = irp->uri;
+						if(imc_dbf.delete(imc_db, mq2_cols, 0, mq2_vals, 3)<0)
+						{
+							LM_ERR("failed to delete from table %s, imp %.*s, uri: %.*s \n",
+															members_table.s, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+						}
+						else
+						{
+							LM_DBG("delete from table %s, imp %.*s, uri: %.*s \n",
+															members_table.s, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+						}
+					}
+
+					mq_vals[0].val.str_val = member->user;
+					mq_vals[1].val.str_val = member->domain;
+					mq_vals[2].val.int_val = member->flags;
+					mq_vals[3].val.str_val = irp->uri;
+
+					if(imc_dbf.insert(imc_db, mq_cols, mq_vals, 4)<0)
+					{
+						LM_WARN("failed to insert  into table %s, member %.*s, uri: %.*s\n",
+								members_table.s, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+						//return;
+					}
+					else
+					{
+						member->database_op = IMC_DATABASE_NOT_TO_SAVE;
+						LM_DBG("inserted into table %s, member %.*s, uri: %.*s\n",
+								members_table.s, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+					}
+				}
+				else
+				{
+					LM_DBG("already inserted into table %s, member %.*s, uri: %.*s\n",
+													members_table.s, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+				}
+				member = member->next;
+			}
+			irp = irp->next;
+		}
+	}
+}
+
 static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 {
 	imc_cmd_t cmd;
 	str body;
+	int write_to_bbdd = 0;
 	struct sip_uri from_uri, *pto_uri=NULL, *pfrom_uri=NULL;
 	struct to_body *pfrom;
 
@@ -485,6 +645,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'create'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_JOIN:
 			if(imc_handle_join(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -492,6 +653,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'join'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_INVITE:
 			if(imc_handle_invite(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -499,6 +661,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'invite'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_ACCEPT:
 			if(imc_handle_accept(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -506,6 +669,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'accept'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_DENY:
 			if(imc_handle_deny(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -513,6 +677,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'deny'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_REMOVE:
 			if(imc_handle_remove(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -520,6 +685,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'remove'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_EXIT:
 			if(imc_handle_exit(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -527,6 +693,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'exit'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_LIST:
 			if(imc_handle_list(msg, &cmd, pfrom_uri, pto_uri)<0)
@@ -541,6 +708,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'destroy'\n");
 				goto error;
 			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_HELP:
 			if(imc_handle_help(msg, &cmd, &pfrom->uri,
@@ -569,6 +737,21 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 	}
 
 done:
+	if(write_to_bbdd == 1)
+	{
+		if (imc_db_mode==DB_MODE_NONE) {
+			LM_WARN("db_mode %d\n", imc_db_mode);
+		} else {
+			if (imc_db_mode!=DB_MODE_REALTIME && imc_db_mode!=DB_MODE_SHUTDOWN ) {
+				LM_ERR("unsupported db_mode %d\n", imc_db_mode);
+			}
+			else if (imc_db_mode==DB_MODE_REALTIME)
+			{
+				save_db();
+			}
+		}
+	}
+
 	return 1;
 
 error:
@@ -576,98 +759,23 @@ error:
 	return -1;	
 }
 
+
 /**
  * destroy module
  */
 void destroy(void)
 {
-	imc_room_p irp = NULL;
-	imc_member_p member = NULL;
-	int i;
-	db_key_t mq_cols[4];
-	db_val_t mq_vals[4];
-	db_key_t rq_cols[4];
-	db_val_t rq_vals[4];
-	
 	LM_DBG("destroy module ...\n");
-	
+
 	if(imc_db==NULL)
 		goto done;
 
-	mq_cols[0] = &imc_col_username;
-	mq_vals[0].type = DB_STR;
-	mq_vals[0].nul = 0;
-			
-	mq_cols[1] = &imc_col_domain;
-	mq_vals[1].type = DB_STR;
-	mq_vals[1].nul = 0;
-	
-	mq_cols[2] = &imc_col_flag;
-	mq_vals[2].type = DB_INT;
-	mq_vals[2].nul = 0;
-
-	mq_cols[3] = &imc_col_room;
-	mq_vals[3].type = DB_STR;
-	mq_vals[3].nul = 0;
-
-
-	rq_cols[0] = &imc_col_name;
-	rq_vals[0].type = DB_STR;
-	rq_vals[0].nul = 0;
-		
-	rq_cols[1] = &imc_col_domain;
-	rq_vals[1].type = DB_STR;
-	rq_vals[1].nul = 0;
-
-	rq_cols[2] = &imc_col_flag;
-	rq_vals[2].type = DB_INT;
-	rq_vals[2].nul = 0;
-
-	for(i=0; i<imc_hash_size; i++) 
+	if (imc_db_mode==DB_MODE_REALTIME || imc_db_mode==DB_MODE_SHUTDOWN ) {
+		save_db();
+	}
+	else
 	{
-		irp = _imc_htable[i].rooms;
-		
-		while(irp)
-		{
-			rq_vals[0].val.str_val = irp->name;
-			rq_vals[1].val.str_val = irp->domain;
-			rq_vals[2].val.int_val = irp->flags;
-
-			if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
-			{
-				LM_ERR("use_table failed\n");
-				return;
-			}
-
-			if(imc_dbf.insert(imc_db, rq_cols, rq_vals, 3)<0)
-			{
-				LM_ERR("failed to insert into table imc_rooms\n");
-				return;
-			}
-			LM_DBG("room %d %.*s\n", i, irp->name.len, irp->name.s);
-			member = irp->members;
-			while(member)
-			{
-				mq_vals[0].val.str_val = member->user;
-				mq_vals[1].val.str_val = member->domain;
-				mq_vals[2].val.int_val = member->flags;
-				mq_vals[3].val.str_val = irp->uri;
-
-				if(imc_dbf.use_table(imc_db, &members_table)< 0)
-				{
-					LM_ERR("use_table failed\n");
-					return;
-				}
-
-				if(imc_dbf.insert(imc_db, mq_cols, mq_vals, 4)<0)
-				{
-					LM_ERR("failed to insert  into table imc_rooms\n");
-					return;
-				}
-				member = member->next;
-			}
-			irp = irp->next;
-		}
+		LM_WARN("db_mode %d. Not saving at shutdown\n", imc_db_mode);
 	}
 
 done:

@@ -1,5 +1,5 @@
 /*
- * $Id$
+ * $Id: imc_mng.c 8503 2011-10-19 09:14:49Z razvancrainea $
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -36,10 +36,23 @@
 #include "../../dprint.h"
 
 #include "imc_mng.h"
+#include "../../db/db.h"
 /* imc hash table */
 extern imc_hentry_p _imc_htable;
 extern int imc_hash_size;
 extern char imc_cmd_start_char;
+
+extern str rooms_table;
+extern str members_table;
+extern db_con_t *imc_db;
+extern db_func_t imc_dbf;
+
+extern str imc_col_username;
+extern str imc_col_domain;
+extern str imc_col_flag;
+extern str imc_col_room;
+extern str imc_col_name;
+
 #define imc_get_hentry(_hid, _size) ((_hid)&(_size-1))
 
 /**
@@ -100,7 +113,7 @@ int imc_htable_destroy(void)
 			irp = _imc_htable[i].rooms;
 			while(irp){
 				irp_temp = irp->next;
-				imc_del_room(&irp->name, &irp->domain);
+				imc_del_room(&irp->name, &irp->domain, 0); // 0, no borra la base de datos
 				irp = irp_temp;
 			}
 	}
@@ -229,14 +242,42 @@ imc_room_p imc_get_room(str* name, str* domain)
 
 /**
  * delete room
+ * erase_database == 1, borra también de base de datos
  */
-int imc_del_room(str* name, str* domain)
+int imc_del_room(str* name, str* domain, char erase_database)
 {
 	imc_room_p irp = NULL;
 	imc_member_p imp=NULL, imp_temp=NULL;
 	unsigned int hashid;
 	int hidx;	
 	
+	db_key_t mq_cols[3];
+	db_val_t mq_vals[3];
+	db_key_t rq_cols[2];
+	db_val_t rq_vals[2];
+
+	mq_cols[0] = &imc_col_username;
+	mq_vals[0].type = DB_STR;
+	mq_vals[0].nul = 0;
+
+	mq_cols[1] = &imc_col_domain;
+	mq_vals[1].type = DB_STR;
+	mq_vals[1].nul = 0;
+
+	mq_cols[2] = &imc_col_room;
+	mq_vals[2].type = DB_STR;
+	mq_vals[2].nul = 0;
+
+
+	rq_cols[0] = &imc_col_name;
+	rq_vals[0].type = DB_STR;
+	rq_vals[0].nul = 0;
+
+	rq_cols[1] = &imc_col_domain;
+	rq_vals[1].type = DB_STR;
+	rq_vals[1].nul = 0;
+
+
 	if(name == NULL || name->s==NULL || name->len<=0
 			|| domain == NULL || domain->s==NULL || domain->len<=0)
 	{
@@ -265,12 +306,57 @@ int imc_del_room(str* name, str* domain)
 				irp->next->prev = irp->prev;
 
 			/* delete members */
+			if(imc_dbf.use_table(imc_db, &members_table)< 0)
+			{
+				LM_ERR("use table failed\n ");
+				goto done;
+			}
 			imp = irp->members;
 			while(imp){
+
+				if(erase_database == 1)
+				{
+					mq_vals[0].val.str_val = imp->user;
+					mq_vals[1].val.str_val = imp->domain;
+					mq_vals[2].val.str_val = irp->uri;
+					if(imc_dbf.delete(imc_db, mq_cols, 0, mq_vals, 3)<0)
+					{
+						LM_ERR("failed to delete from table %s, imp %.*s, uri: %.*s \n",
+														members_table.s, imp->user.len, imp->user.s, irp->uri.len, irp->uri.s);
+						goto done;
+					}
+					else
+					{
+						LM_DBG("delete from table %s, imp %.*s, uri: %.*s \n",
+														members_table.s, imp->user.len, imp->user.s, irp->uri.len, irp->uri.s);
+					}
+				}
+
 				imp_temp = imp->next;
 				shm_free(imp);
 				imp = imp_temp;
 			}		
+
+			if(erase_database == 1)
+			{
+				rq_vals[0].val.str_val = irp->name;
+				rq_vals[1].val.str_val = irp->domain;
+
+				if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
+				{
+					LM_ERR("use_table failed\n");
+					goto done;
+				}
+				if(imc_dbf.delete(imc_db, rq_cols, 0, rq_vals, 2)<0)
+				{
+					LM_ERR("failed from delete in table %s, room %.*s \n", rooms_table.s, irp->name.len, irp->name.s);
+					goto done;
+				}
+				else
+				{
+					LM_DBG("deleted from table %s, room %.*s \n", rooms_table.s, irp->name.len, irp->name.s);
+				}
+			}
 
 			shm_free(irp);
 
@@ -381,11 +467,27 @@ imc_member_p imc_get_member(imc_room_p room, str* user, str* domain)
 /**
  * delete member
  */
-int imc_del_member(imc_room_p room, str* user, str* domain)
+int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 {
 	imc_member_p imp = NULL;
 	unsigned int hashid;
 	
+	db_key_t mq_cols[3];
+	db_val_t mq_vals[3];
+
+	mq_cols[0] = &imc_col_username;
+	mq_vals[0].type = DB_STR;
+	mq_vals[0].nul = 0;
+
+	mq_cols[1] = &imc_col_domain;
+	mq_vals[1].type = DB_STR;
+	mq_vals[1].nul = 0;
+
+	mq_cols[2] = &imc_col_room;
+	mq_vals[2].type = DB_STR;
+	mq_vals[2].nul = 0;
+
+
 	if(room==NULL || user == NULL || user->s==NULL || user->len<=0
 			|| domain == NULL || domain->s==NULL || domain->len<=0)
 	{
@@ -408,6 +510,24 @@ int imc_del_member(imc_room_p room, str* user, str* domain)
 				imp->prev->next = imp->next;
 			if(imp->next!=NULL)
 				imp->next->prev = imp->prev;
+
+			if(erase_database == 1)
+			{
+				mq_vals[0].val.str_val = imp->user;
+				mq_vals[1].val.str_val = imp->domain;
+				mq_vals[2].val.str_val = room->uri;
+				if(imc_dbf.delete(imc_db, mq_cols, 0, mq_vals, 3)<0)
+				{
+					LM_ERR("failed to delete from table %s, imp %.*s, uri: %.*s \n",
+													members_table.s, imp->user.len, imp->user.s, room->uri.len, room->uri.s);
+				}
+				else
+				{
+					LM_DBG("delete from table %s, imp %.*s, uri: %.*s \n",
+													members_table.s, imp->user.len, imp->user.s, room->uri.len, room->uri.s);
+				}
+			}
+
 			shm_free(imp);
 			room->nr_of_members--;
 			return 0;

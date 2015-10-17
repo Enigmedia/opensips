@@ -1,5 +1,5 @@
 /*
- * $Id$
+ * $Id: imc_cmd.c 5901 2009-07-21 07:45:05Z bogdan_iancu $
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -144,7 +144,7 @@ int imc_parse_cmd(char *buf, int len, imc_cmd_p cmd)
 	} while(1);
 	
 done:
-	LM_ERR("command: [%.*s]\n", cmd->name.len, cmd->name.s);
+	LM_DBG("command: [%.*s]\n", cmd->name.len, cmd->name.s);
 	for(i=0; i<IMC_CMD_MAX_PARAM; i++)
 	{
 		if(cmd->param[i].len<=0)
@@ -550,6 +550,7 @@ int imc_handle_accept(struct sip_msg* msg, imc_cmd_t *cmd,
 	}
 			
 	member->flags &= ~IMC_MEMBER_INVITED;
+	member->database_op = IMC_DATABASE_TO_UPDATE;
 					
 	/* send info message */
 	body.s = imc_body_buf;
@@ -690,10 +691,10 @@ int imc_handle_remove(struct sip_msg* msg, imc_cmd_t *cmd,
 	imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
 
 	member->flags |= IMC_MEMBER_DELETED;
-	imc_del_member(room, &inv_uri.user, &inv_uri.host);
+	imc_del_member(room, &inv_uri.user, &inv_uri.host, 1);
 
 	body.s = imc_body_buf;
-	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has joined the room",
+	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has been removed from the room",
 					member->uri.len, member->uri.s);
 	if(body.len>0)
 		imc_room_broadcast(room, &imc_hdr_ctype, &body);
@@ -753,7 +754,7 @@ int imc_handle_deny(struct sip_msg* msg, imc_cmd_t *cmd,
 	LM_ERR("user [%.*s] declined invitation in room [%.*s]!\n", 
 			src->user.len, src->user.s,	room_name.len, room_name.s);
 
-	imc_del_member(room, &src->user, &src->host);
+	imc_del_member(room, &src->user, &src->host, 1);
 	
 	imc_release_room(room);
 
@@ -879,13 +880,13 @@ int imc_handle_exit(struct sip_msg* msg, imc_cmd_t *cmd,
 
 		imc_release_room(room);
 		
-		imc_del_room(&room_name, &dst->host);
+		imc_del_room(&room_name, &dst->host, 1);
 		room = NULL;
 		goto done;
 	} else {
 		/* delete user */
 		member->flags |= IMC_MEMBER_DELETED;
-		imc_del_member(room, &src->user, &src->host);
+		imc_del_member(room, &src->user, &src->host, 1);
 		body.s = imc_body_buf;
 		body.len = snprintf(body.s, IMC_BUF_SIZE, 
 				"The user [%.*s] has left the room",
@@ -954,7 +955,7 @@ int imc_handle_destroy(struct sip_msg* msg, imc_cmd_t *cmd,
 	imc_release_room(room);
 
 	LM_DBG("deleting room\n");
-	imc_del_room(&room_name, &dst->host);
+	imc_del_room(&room_name, &dst->host, 1);
 
 	return 0;
 
@@ -1179,7 +1180,8 @@ void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps)
 		}
 		imc_del_member(room,
 				&((del_member_t *)(*ps->param))->member_name,
-				&((del_member_t *)(*ps->param))->member_domain);
+				&((del_member_t *)(*ps->param))->member_domain,
+				1);
 		goto build_inform;
 
 	}

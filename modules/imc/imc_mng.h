@@ -1,5 +1,5 @@
 /*
- * $Id$
+ * $Id: imc_mng.h 5901 2009-07-21 07:45:05Z bogdan_iancu $
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -43,6 +43,13 @@
 #define IMC_MEMBER_DELETED  1<<3
 #define IMC_MEMBER_SKIP     1<<4
 
+#define IMC_DATABASE_TO_SAVE  0
+#define IMC_DATABASE_NOT_TO_SAVE  1
+#define IMC_DATABASE_TO_UPDATE  2
+
+
+
+
 typedef struct _imc_member
 {
 	unsigned int hashid;
@@ -50,6 +57,7 @@ typedef struct _imc_member
 	str user;
 	str domain;
 	int flags;
+	char database_op; // flag que indica si hay que grabar a bbdd o no. =0 es que hay que grabar
 	struct _imc_member * next;
 	struct _imc_member * prev;
 } imc_member_t, *imc_member_p;
@@ -74,6 +82,7 @@ typedef struct _imc_room
 	str domain;
 	int flags;
 	int nr_of_members;
+	char database_op; // flag que indica si hay que grabar a bbdd o no. =0 es que hay que grabar
 	imc_member_p members;
 	struct _imc_room * next;
 	struct _imc_room * prev;
@@ -87,11 +96,11 @@ typedef struct _imc_hentry
 
 imc_member_p imc_add_member(imc_room_p room, str* user, str* domain, int flags);
 imc_member_p imc_get_member(imc_room_p room, str* user, str* domain);
-int imc_del_member(imc_room_p room, str* user, str* domain);
+int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database);
 
 imc_room_p imc_add_room(str* name, str* domain, int flags);
 imc_room_p imc_get_room(str* name, str* domain);
-int imc_del_room(str* name, str* domain);
+int imc_del_room(str* name, str* domain, char erase_database);
 int imc_release_room(imc_room_p room);
 
 int imc_htable_init();
