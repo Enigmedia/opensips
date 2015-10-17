@@ -1085,7 +1085,7 @@ error:
 int imc_handle_groups(struct sip_msg* msg, imc_cmd_t *cmd, struct sip_uri *pfrom_uri, str *src, str *dst)
 {
 	str body;
-	imc_handle_groups_internal(pfrom_uri, imc_body_buf, IMC_BUF_SIZE, &body);
+	imc_handle_groups_internal(pfrom_uri, &body);
 	LM_DBG("groups = [%.*s]\n", body.len, body.s);
 
 	LM_DBG("to: [%.*s] from: [%.*s]\n", src->len, src->s, dst->len, dst->s);
@@ -1100,6 +1100,11 @@ int imc_handle_groups(struct sip_msg* msg, imc_cmd_t *cmd, struct sip_uri *pfrom
 				NULL,									/* callback parameter*/
 				NULL
 				);
+
+	if(body.s!=NULL)
+	{
+		pkg_free(body.s);
+	}
 	return 0;
 }
 

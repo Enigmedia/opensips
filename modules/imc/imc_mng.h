@@ -101,7 +101,7 @@ int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 
 imc_room_p imc_add_room(str* name, str* domain, int flags);
 imc_room_p imc_get_room(str* name, str* domain);
-int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, int body_buf_len, str *body);
+int imc_handle_groups_internal(struct sip_uri *src, str *body);
 int imc_del_room(str* name, str* domain, char erase_database);
 int imc_set_room_alias(str* name, str* domain, char erase_database);
 int imc_release_room(imc_room_p room);

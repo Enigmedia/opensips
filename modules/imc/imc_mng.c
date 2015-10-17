@@ -55,6 +55,8 @@ extern str imc_col_name;
 
 #define imc_get_hentry(_hid, _size) ((_hid)&(_size-1))
 
+#define GROUPS_MAX_LINE_LEN 1024
+
 /**
  * hash thable init
  */
@@ -683,22 +685,42 @@ int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 }
 
 
+char* strcat_copy(const char *str1, const char *str2) {
+    int str1_len, str2_len;
+    char *new_str;
+
+    /* null check */
+
+    str1_len = strlen(str1);
+    str2_len = strlen(str2);
+
+    new_str = pkg_malloc(str1_len + str2_len + 1);
+
+    /* null check */
+
+    memcpy(new_str, str1, str1_len);
+    memcpy(new_str + str1_len, str2, str2_len + 1);
+
+    return new_str;
+}
 
 /**
  *
  */
-int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, int body_buf_len, str *body)
+int imc_handle_groups_internal(struct sip_uri *src, str *body)
 {
+	char body_buf[GROUPS_MAX_LINE_LEN];
 	int i;
 	imc_member_p member = 0;
 	imc_room_p irp = NULL, irp_temp=NULL;
 	char *p;
+	char *result = NULL;
 	if(_imc_htable==NULL)
 		return -1;
 
 	p =body_buf;
 
-	snprintf(p, body_buf_len, "Rooms:\n");
+	snprintf(p, GROUPS_MAX_LINE_LEN, "Rooms:\n");
 	p = p + strlen(p);
 
 	for(i=0; i<imc_hash_size; i++)
@@ -726,20 +748,28 @@ int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, int body_buf
 					*p++ = '~';
 				}
 
-				snprintf(p, body_buf_len, "sip:%.*s@%.*s %.*s\n",irp->name.len,irp->name.s,irp->domain.len,irp->domain.s,irp->alias.len, irp->alias.s);
-				p = p + strlen(p);
+				snprintf(p, GROUPS_MAX_LINE_LEN, "sip:%.*s@%.*s %.*s\n",irp->name.len,irp->name.s,irp->domain.len,irp->domain.s,irp->alias.len, irp->alias.s);
 
-
+				if(result!=NULL)
+				{
+					char* resultAux = strcat_copy(result, body_buf);
+					pkg_free(result);
+					result = resultAux;
+				}
+				else
+				{
+					result = pkg_malloc(strlen(body_buf) + 1);
+					memcpy(result,body_buf,strlen(body_buf)+1);
+				}
+				p =body_buf;
 			}
 			irp = irp_temp;
 		}
 		lock_release(&_imc_htable[i].lock);
 	}
 
-	/* write over last '\n' */
-	*(--p) = 0;
-	body->s   = body_buf;
-	body->len = p - body->s;
+	body->s   = result;
+	body->len = strlen(result);
 
 	return 0;
 }
