@@ -574,6 +574,9 @@ void save_db(void)
 			member = irp->members;
 			while(member)
 			{
+				LM_DBG("checking room %.*s, idx=%d\n", irp->name.len, irp->name.s,i);
+				LM_DBG("%p flags: %d %.*s, uri: %.*s \n",member, member->flags, member->user.len, member->user.s, irp->uri.len, irp->uri.s);
+
 				if(member->database_op == IMC_DATABASE_TO_SAVE || member->database_op == IMC_DATABASE_TO_UPDATE)
 				{
 					if(imc_dbf.use_table(imc_db, &members_table)< 0)
@@ -715,6 +718,14 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 			}
 			write_to_bbdd = 1;
 		break;
+		case IMC_CMDID_ADD:
+			if(imc_handle_add(msg, &cmd, pfrom_uri, pto_uri)<0)
+			{
+				LM_ERR("failed to handle 'add'\n");
+				goto error;
+			}
+			write_to_bbdd = 1;
+		break;
 		case IMC_CMDID_ACCEPT:
 			if(imc_handle_accept(msg, &cmd, pfrom_uri, pto_uri)<0)
 			{
@@ -790,6 +801,14 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 			(msg->new_uri.s)?&msg->new_uri:&msg->first_line.u.request.uri)<0)
 			{
 				LM_ERR("failed to handle 'help'\n");
+				goto error;
+			}
+		break;
+		case IMC_CMDID_GROUPS:
+			if(imc_handle_groups(msg, &cmd, pfrom_uri, &pfrom->uri,
+			(msg->new_uri.s)?&msg->new_uri:&msg->first_line.u.request.uri)<0)
+			{
+				LM_ERR("failed to handle 'groups'\n");
 				goto error;
 			}
 		break;
@@ -995,3 +1014,5 @@ error:
 	free_mi_tree(rpl_tree);
 	return 0;
 }
+
+

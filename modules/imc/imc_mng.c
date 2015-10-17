@@ -570,6 +570,8 @@ imc_member_p imc_add_member(imc_room_p room, str* user, str* domain, int flags)
 		room->members->next=imp;
 	}
 
+	LM_DBG("%s %p flags=%d, %.*s \n",__FUNCTION__, imp, imp->flags, imp->uri.len, imp->uri.s);
+
 	return imp;
 }
 
@@ -679,3 +681,62 @@ int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 	
 	return 0;
 }
+
+
+
+/**
+ *
+ */
+int imc_handle_groups_internal(struct sip_uri *src, char* body_buf, str *body)
+{
+	int i;
+	imc_member_p member = 0;
+	imc_room_p irp = NULL, irp_temp=NULL;
+	char *p;
+	if(_imc_htable==NULL)
+		return -1;
+
+	p =body_buf;
+
+	for(i=0; i<imc_hash_size; i++)
+	{
+		lock_get(&_imc_htable[i].lock);
+		if(_imc_htable[i].rooms==NULL)
+		{
+			lock_release(&_imc_htable[i].lock);
+			continue;
+		}
+		irp = _imc_htable[i].rooms;
+		while(irp){
+			irp_temp = irp->next;
+			/* verify if the user is a member of the room */
+			member = imc_get_member(irp, &src->user, &src->host);
+
+			if(member != NULL)
+			{
+				if(member->flags & IMC_MEMBER_OWNER)
+				{
+					*p++ = '*';
+				}
+				else if(member->flags & IMC_MEMBER_ADMIN)
+				{
+					*p++ = '~';
+				}
+
+				strncpy(p, irp->name.s, irp->name.len);
+				p += irp->name.len;
+				*p++ = '\n';
+			}
+			irp = irp_temp;
+		}
+		lock_release(&_imc_htable[i].lock);
+	}
+
+	/* write over last '\n' */
+	*(--p) = 0;
+	body->s   = body_buf;
+	body->len = p - body->s;
+
+	return 0;
+}
+

@@ -94,6 +94,9 @@ int imc_parse_cmd(char *buf, int len, imc_cmd_p cmd)
 	} else if(cmd->name.len==(sizeof("invite")-1)
 				&& !strncasecmp(cmd->name.s, "invite", cmd->name.len)) {
 		cmd->type = IMC_CMDID_INVITE;
+	} else if(cmd->name.len==(sizeof("add")-1)
+					&& !strncasecmp(cmd->name.s, "add", cmd->name.len)) {
+			cmd->type = IMC_CMDID_ADD;
 	} else if(cmd->name.len==(sizeof("accept")-1)
 				&& !strncasecmp(cmd->name.s, "accept", cmd->name.len)) {
 		cmd->type = IMC_CMDID_ACCEPT;
@@ -109,6 +112,9 @@ int imc_parse_cmd(char *buf, int len, imc_cmd_p cmd)
 	} else if(cmd->name.len==(sizeof("list")-1)
 				&& !strncasecmp(cmd->name.s, "list", cmd->name.len)) {
 		cmd->type = IMC_CMDID_LIST;
+	} else if(cmd->name.len==(sizeof("groups")-1)
+					&& !strncasecmp(cmd->name.s, "groups", cmd->name.len)) {
+			cmd->type = IMC_CMDID_GROUPS;
 	} else if(cmd->name.len==(sizeof("destroy")-1)
 				&& !strncasecmp(cmd->name.s, "destroy", cmd->name.len)) {
 		cmd->type = IMC_CMDID_DESTROY;
@@ -539,6 +545,201 @@ error:
 	return -1;
 }
 
+
+/**
+ *
+ */
+int imc_handle_add(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst)
+{
+	imc_room_p room = 0;
+	imc_member_p member = 0;
+	imc_member_p inviter = 0;
+	int flag_member = 0;
+	int size = 0;
+	int i = 0;
+	int add_domain = 0;
+	int add_sip = 0;
+	str uri = {0, 0};
+	str body;
+	str room_name;
+	struct sip_uri inv_uri;
+	del_member_t *cback_param = NULL;
+	int result;
+
+
+	size = cmd->param[0].len+2 ;
+	add_domain = 1;
+	add_sip = 0;
+	while (i<size )
+	{
+		if(cmd->param[0].s[i]== '@')
+		{
+			add_domain = 0;
+			break;
+		}
+		i++;
+	}
+
+	if(add_domain)
+		size += dst->host.len;
+
+	if(cmd->param[0].len<4 || strncasecmp(cmd->param[0].s, "sip:", 4)!=0)
+	{
+		size += 4;
+		add_sip = 1;
+	}
+
+	uri.s = (char*)pkg_malloc(size *sizeof(char));
+	if(uri.s == NULL)
+	{
+		LM_ERR("no more pkg memory\n");
+		goto error;
+	}
+	size= 0;
+	if(add_sip)
+	{
+		strcpy(uri.s, "sip:");
+		size=4;
+	}
+
+	memcpy(uri.s+size, cmd->param[0].s, cmd->param[0].len);
+	size += cmd->param[0].len;
+
+	if(add_domain)
+	{
+		uri.s[size] = '@';
+		size++;
+		memcpy(uri.s+ size, dst->host.s, dst->host.len);
+		size+= dst->host.len;
+	}
+	uri.len = size;
+
+	if(parse_uri(uri.s, uri.len, &inv_uri)!=0)
+	{
+		LM_ERR("bad uri [%.*s]!\n", uri.len, uri.s);
+		goto error;
+	}
+
+	room_name = (cmd->param[1].s)?cmd->param[1]:dst->user;
+	room = imc_get_room(&room_name, &dst->host);
+	if(room== NULL || (room->flags&IMC_ROOM_DELETED))
+	{
+		LM_ERR("the room does not exist [%.*s]!\n",
+				room_name.len, room_name.s);
+		goto error;
+	}
+	member= imc_get_member(room, &src->user, &src->host);
+	inviter = member;
+
+	if(member==NULL)
+	{
+		LM_ERR("user [%.*s] is not member of[%.*s]!\n",
+			src->user.len, src->user.s, room_name.len, room_name.s);
+		goto error;
+	}
+	if(!(member->flags & IMC_MEMBER_OWNER) &&
+			!(member->flags & IMC_MEMBER_ADMIN))
+	{
+		LM_ERR("user [%.*s] has no right to invite"
+				" other users!\n", src->user.len, src->user.s);
+		goto error;
+	}
+
+	member= imc_get_member(room, &inv_uri.user, &inv_uri.host);
+	if(member!=NULL)
+	{
+		LM_ERR("user [%.*s] is already member"
+				" of the room!\n", inv_uri.user.len, inv_uri.user.s);
+		goto error;
+	}
+
+	//flag_member |= IMC_MEMBER_INVITED;
+	member=imc_add_member(room, &inv_uri.user, &inv_uri.host, flag_member);
+	if(member == NULL)
+	{
+		LM_ERR("adding member [%.*s]\n",
+				inv_uri.user.len, inv_uri.user.s);
+		goto error;
+	}
+	member->database_op = IMC_DATABASE_TO_SAVE;
+
+	body.len = 11 + inviter->uri.len - 4/* sip: */;
+	if(body.len>=IMC_BUF_SIZE || member->uri.len>=IMC_BUF_SIZE
+			|| room->uri.len>=IMC_BUF_SIZE)
+	{
+		LM_ERR("buffer size overflow\n");
+		goto error;
+	}
+
+	body.s = imc_body_buf;
+	body.len = snprintf(body.s,IMC_BUF_SIZE,"ADDED from: %.*s",inviter->uri.len -4,inviter->uri.s + 4);
+
+
+	LM_DBG("to=[%.*s]\nfrom=[%.*s]\nbody=[%.*s]\n",
+			member->uri.len,member->uri.s,room->uri.len, room->uri.s,
+			body.len, body.s);
+
+	cback_param = (del_member_t*)shm_malloc(sizeof(del_member_t));
+	if(cback_param==NULL)
+	{
+		LM_ERR("no more shm\n");
+		goto error;
+	}
+	memset(cback_param, 0, sizeof(del_member_t));
+	cback_param->room_name = room->name;
+	cback_param->room_domain = room->domain;
+	cback_param->member_name = member->user;
+	cback_param->member_domain = member->domain;
+	cback_param->inv_uri = inviter->uri;
+	/*?!?! possible race with 'remove user' */
+	result= tmb.t_request(&imc_msg_type,				/* Request Method */
+				&member->uri,							/* Request-URI */
+				&member->uri,							/* To */
+				&room->uri,								/* From */
+				&imc_hdr_ctype,							/* Extra headers */
+				&body,						            /* Message body */
+				(outbound_proxy.s)?&outbound_proxy:NULL,/* outbound proxy*/
+				imc_inv_callback,						/* callback function*/
+				(void*)(cback_param),					/* callback param*/
+				NULL
+			);
+	if(result< 0)
+	{
+		LM_ERR("in tm send request\n");
+		shm_free(cback_param);
+		goto error;
+	}
+	if(uri.s!=NULL)
+		pkg_free(uri.s);
+
+	/* send info message */
+	body.s = imc_body_buf;
+	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has joined the room",
+					member->uri.len, member->uri.s);
+	if(body.len>0)
+	{
+		member->flags |= IMC_MEMBER_SKIP;
+		imc_room_broadcast(room, &imc_hdr_ctype, &body);
+		member->flags &= ~IMC_MEMBER_SKIP;
+	}
+
+	imc_release_room(room);
+
+	return 0;
+
+error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
+	if(uri.s!=0)
+		pkg_free(uri.s);
+
+	if(room!=NULL)
+		imc_release_room(room);
+
+	return -1;
+}
+
 /**
  *
  */
@@ -875,6 +1076,33 @@ error:
 		imc_release_room(room);
 	return -1;
 }
+
+
+
+/**
+ *
+ */
+int imc_handle_groups(struct sip_msg* msg, imc_cmd_t *cmd, struct sip_uri *pfrom_uri, str *src, str *dst)
+{
+	str body;
+	imc_handle_groups_internal(pfrom_uri, imc_body_buf, &body);
+	LM_DBG("groups = [%.*s]\n", body.len, body.s);
+
+	LM_DBG("to: [%.*s] from: [%.*s]\n", src->len, src->s, dst->len, dst->s);
+	tmb.t_request(&imc_msg_type,						/* Request method */
+				NULL,									/* Request-URI */
+				src,									/* To */
+				dst,									/* From */
+				&imc_hdr_ctype,							/* Headers */
+				&body,									/* Body */
+				(outbound_proxy.s)?&outbound_proxy:NULL,/* outbound proxy */
+				NULL,									/* callback function */
+				NULL,									/* callback parameter*/
+				NULL
+				);
+	return 0;
+}
+
 
 /**
  *

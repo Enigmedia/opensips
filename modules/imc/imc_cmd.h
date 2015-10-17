@@ -51,10 +51,14 @@
 #define IMC_CMDID_OWNER	 	11
 #define IMC_CMDID_HELP		12
 #define IMC_CMDID_LIST		13
-#define IMC_CMDID_UNKNOWN	14
+#define IMC_CMDID_ADD		14
+#define IMC_CMDID_GROUPS	15
+#define IMC_CMDID_UNKNOWN	16
 
 #define IMC_CMD_CREATE	"create"
 #define IMC_CMD_INVITE	"invite"
+#define IMC_CMD_ADD		"add"
+#define IMC_CMD_GROUPS	"groups"
 #define IMC_CMD_JOIN	"join"
 #define IMC_CMD_EXIT	"exit"
 #define IMC_CMD_ACCEPT	"accept"
@@ -75,6 +79,8 @@ create new connference room\r\n\
 join the conference room\r\n\
 "IMC_CMD_START_STR IMC_CMD_INVITE" <user_name> [<room_name>] - \
 invite a user to join a conference room\r\n\
+"IMC_CMD_START_STR IMC_CMD_ADD" <user_name> [<room_name>] - \
+add a user into a conference room\r\n\
 "IMC_CMD_START_STR IMC_CMD_ACCEPT" - \
 accept invitation to join a conference room\r\n\
 "IMC_CMD_START_STR IMC_CMD_DENY" - \
@@ -91,6 +97,8 @@ destroy conference room\r\n\
 set room alias\r\n\
 "IMC_CMD_START_STR IMC_CMD_NAME" [<room_name>] - \
 get room alias\r\n\
+"IMC_CMD_START_STR IMC_CMD_GROUPS" - \
+get user rooms\r\n\
 "IMC_CMD_START_STR IMC_CMD_OWNER" <user_name> [<room_name>] - \
 set user as owner\r\n"
 
@@ -113,6 +121,8 @@ int imc_handle_join(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
+int imc_handle_add(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_accept(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_deny(struct sip_msg* msg, imc_cmd_t *cmd,
@@ -121,6 +131,8 @@ int imc_handle_remove(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
+int imc_handle_groups(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *pfrom_uri, str *src, str *dst);
 int imc_handle_exit(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_destroy(struct sip_msg* msg, imc_cmd_t *cmd,
