@@ -1743,14 +1743,17 @@ int imc_send_message(str *src, str *dst, str *headers, str *body)
  */
 void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps)
 {
+#ifdef _408_WORKAROUND_
 	str body_final;
 	char from_uri_buf[256];
 	char to_uri_buf[256];
 	char body_buf[256];
 	str from_uri_s, to_uri_s;
+#endif
 	imc_member_p member= NULL;
+#ifdef _408_WORKAROUND_
 	imc_room_p room = NULL;
-
+#endif
 	if(ps->param==NULL || *ps->param==NULL || 
 			(del_member_t*)(*ps->param) == NULL)
 	{
@@ -1764,6 +1767,10 @@ void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps)
 			((del_member_t *)(*ps->param))->member_name.s,
 			((del_member_t *)(*ps->param))->member_domain.len, 
 			((del_member_t *)(*ps->param))->member_domain.s);
+
+	return;
+#ifdef _408_WORKAROUND_
+	// Quitamos esta parte de código debido a problemas detectados
 	if(ps->code < 300)
 		return;
 	else
@@ -1793,7 +1800,7 @@ void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps)
 		goto build_inform;
 
 	}
-	
+
 
 build_inform:
 		
@@ -1850,6 +1857,7 @@ error:
 	if((del_member_t *)(*ps->param))
 		shm_free(*ps->param);
 	return; 
+#endif
 }
 
 
