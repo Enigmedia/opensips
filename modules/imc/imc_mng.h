@@ -109,6 +109,8 @@ int imc_release_room(imc_room_p room);
 int imc_htable_init();
 int imc_htable_destroy();
 
+char* strcat_copy(const char *str1, const char *str2);
+
 
 
 #endif

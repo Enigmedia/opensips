@@ -49,6 +49,7 @@ int imc_room_broadcast(imc_room_p room, str *ctype, str *body);
 void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps);
 void imc_send_error( imc_room_p room, imc_member_p member, const char* msg);
 
+
 /**
  * parse cmd
  */
@@ -1002,6 +1003,7 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 	str room_name;
 	str body;
 	char *p;
+	char *result = NULL;
 	int foundOwner = 0;
 	
 	/* the user wants to leave the room */
@@ -1047,9 +1049,21 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 			*p++ = '~';
 		}
 
-		strncpy(p, imp->uri.s, imp->uri.len);
-		p += imp->uri.len;
-		*p++ = '\n';
+		snprintf(p, IMC_BUF_SIZE-9-1, "%.*s\n", imp->uri.len, imp->uri.s);
+
+		if(result!=NULL)
+		{
+			char* resultAux = strcat_copy(result, (const char*) imc_body_buf);
+		 	pkg_free(result);
+		 	result = resultAux;
+		}
+	    else
+	    {
+	    	result = pkg_malloc(strlen(imc_body_buf) + 1);
+		 	memcpy(result,imc_body_buf,strlen(imc_body_buf)+1);
+		}
+		p =imc_body_buf;
+
 		imp = imp->next;
 	}
 	
@@ -1060,13 +1074,15 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	imc_release_room(room);
 
-	/* write over last '\n' */
-	*(--p) = 0;
-	body.s   = imc_body_buf;
-	body.len = p-body.s;
+	body.s   = result;
+	body.len = strlen(result);
 	LM_DBG("members = [%.*s]\n", body.len, body.s);
 	imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
 
+	if(body.s!=NULL)
+	{
+		pkg_free(body.s);
+	}
 
 	return 0;
 error:
@@ -1750,8 +1766,8 @@ void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps)
 	char body_buf[256];
 	str from_uri_s, to_uri_s;
 #endif
-	imc_member_p member= NULL;
 #ifdef _408_WORKAROUND_
+	imc_member_p member= NULL;
 	imc_room_p room = NULL;
 #endif
 	if(ps->param==NULL || *ps->param==NULL || 
