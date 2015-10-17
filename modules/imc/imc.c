@@ -66,15 +66,15 @@ static str db_url  = {NULL, 0};
 str outbound_proxy = {NULL, 0};
 int imc_db_mode = DB_MODE_SHUTDOWN;
 
-static str rooms_table   = str_init("imc_rooms");
-static str members_table = str_init("imc_members");
+str rooms_table   = str_init("imc_rooms");
+str members_table = str_init("imc_members");
 
-static str imc_col_username = str_init("username");
-static str imc_col_domain   = str_init("domain");
-static str imc_col_flag     = str_init("flag");
-static str imc_col_room     = str_init("room");
-static str imc_col_name     = str_init("name");
-static str imc_col_alias    = str_init("alias");
+str imc_col_username = str_init("username");
+str imc_col_domain   = str_init("domain");
+str imc_col_flag     = str_init("flag");
+str imc_col_room     = str_init("room");
+str imc_col_name     = str_init("name");
+str imc_col_alias    = str_init("alias");
 
 imc_hentry_p _imc_htable = NULL;
 int imc_hash_size = 4;
