@@ -47,6 +47,7 @@ static str imc_hdr_ctype = { "Content-Type: text/plain\r\n",  26};
 int imc_send_message(str *src, str *dst, str *headers, str *body);
 int imc_room_broadcast(imc_room_p room, str *ctype, str *body);
 void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps);
+void imc_send_error( imc_room_p room, imc_member_p member, const char* msg);
 
 /**
  * parse cmd
@@ -247,6 +248,8 @@ done:
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -345,6 +348,8 @@ done:
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -523,6 +528,8 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(uri.s!=0)
 		pkg_free(uri.s);
 
@@ -574,6 +581,8 @@ int imc_handle_accept(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -717,6 +726,8 @@ int imc_handle_remove(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(uri.s!=0)
 		pkg_free(uri.s);
 	if(room!=NULL)
@@ -771,6 +782,8 @@ int imc_handle_deny(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	return 0;
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -788,6 +801,7 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 	str room_name;
 	str body;
 	char *p;
+	int foundOwner = 0;
 	
 	/* the user wants to leave the room */
 	room_name = cmd->param[0].s?cmd->param[0]:dst->user;
@@ -822,15 +836,27 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 			continue;
 		}
 		if(imp->flags & IMC_MEMBER_OWNER)
+		{
+			foundOwner = 1;
 			*p++ = '*';
+		}
 		else if(imp->flags & IMC_MEMBER_ADMIN)
+		{
+			foundOwner = 1;
 			*p++ = '~';
+		}
+
 		strncpy(p, imp->uri.s, imp->uri.len);
 		p += imp->uri.len;
 		*p++ = '\n';
 		imp = imp->next;
 	}
 	
+	if(!foundOwner)
+	{
+		LM_ERR("Not found owner in %.*s\n", room_name.len, room_name.s);
+	}
+
 	imc_release_room(room);
 
 	/* write over last '\n' */
@@ -843,6 +869,8 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	return 0;
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -898,10 +926,12 @@ int imc_handle_exit(struct sip_msg* msg, imc_cmd_t *cmd,
 		/* delete user */
 		member->flags |= IMC_MEMBER_DELETED;
 		imc_del_member(room, &src->user, &src->host, 1);
+
 		body.s = imc_body_buf;
 		body.len = snprintf(body.s, IMC_BUF_SIZE, 
-				"The user [%.*s] has left the room",
-				src->user.len, src->user.s);
+				"The user [sip:%.*s@%.*s] has left the room",
+				src->user.len, src->user.s,
+				src->host.len, src->host.s);
 		if(body.len>0)
 			imc_room_broadcast(room, &imc_hdr_ctype, &body);
 	}
@@ -912,6 +942,8 @@ done:
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -971,6 +1003,8 @@ int imc_handle_destroy(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -1046,7 +1080,10 @@ int imc_handle_rename(struct sip_msg* msg, imc_cmd_t *cmd,
 	room->database_op = IMC_DATABASE_TO_UPDATE;
 
 	body.s = imc_body_buf;
-	snprintf(body.s,IMC_BUF_SIZE,"The alias of room has been modified: %s", room->alias.s);
+	snprintf(body.s,IMC_BUF_SIZE,"The alias of room has been modified: %.*s by sip:%.*s@%.*s",
+			room->alias.len, room->alias.s,
+			src->user.len, src->user.s,
+			src->host.len, src->host.s);
 	body.len = strlen(body.s);
 
 	/* braodcast message */
@@ -1057,6 +1094,8 @@ int imc_handle_rename(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -1112,14 +1151,19 @@ int imc_handle_name(struct sip_msg* msg, imc_cmd_t *cmd,
 	snprintf(body.s,IMC_BUF_SIZE,"The alias of the room is: %s", room->alias.s);
 	body.len = strlen(body.s);
 
-	/* braodcast message */
-	imc_room_broadcast(room, &imc_hdr_ctype, &body);
+
+	LM_DBG("to: [%.*s]\nfrom: [%.*s]\nbody: [%.*s]\n",
+			member->uri.len, member->uri.s , room->uri.len, room->uri.s,
+			body.len, body.s);
+	imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
 
 	imc_release_room(room);
 
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -1145,6 +1189,12 @@ int imc_handle_owner(struct sip_msg* msg, imc_cmd_t *cmd,
 	int add_domain = 0;
 	int add_sip = 0;
 	struct sip_uri inv_uri;
+
+	if(cmd->param[0].s == NULL)
+    {
+		LM_ERR("owner param mandatory\n");
+		goto error;
+	}
 
 	size= cmd->param[0].len+2;
 	add_domain = 1;
@@ -1280,6 +1330,8 @@ int imc_handle_owner(struct sip_msg* msg, imc_cmd_t *cmd,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -1392,6 +1444,8 @@ int imc_handle_message(struct sip_msg* msg, str *msgbody,
 	return 0;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -1554,6 +1608,8 @@ send_message:
 	return;
 
 error:
+	snprintf(imc_body_buf, IMC_BUF_SIZE, "Error in %s", __FUNCTION__);
+	imc_send_error(room, member, imc_body_buf);
 	if(room!=NULL)
 	{
 		imc_release_room(room);
@@ -1563,3 +1619,24 @@ error:
 	return; 
 }
 
+
+/*
+ *
+ */
+void imc_send_error( imc_room_p room, imc_member_p member, const char* msg)
+{
+	str body;
+	char imc_body_buf2[IMC_BUF_SIZE];
+
+	if(room!=NULL && member != NULL)
+	{
+		body.s = imc_body_buf2;
+		snprintf(body.s,IMC_BUF_SIZE,"Error in IMC module: %s", msg);
+		body.len = strlen(body.s);
+
+		LM_DBG("to: [%.*s]\nfrom: [%.*s]\nbody: [%.*s]\n",
+				member->uri.len, member->uri.s , room->uri.len, room->uri.s,
+				body.len, body.s);
+		imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
+	}
+}

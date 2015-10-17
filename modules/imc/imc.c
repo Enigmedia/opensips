@@ -251,10 +251,14 @@ int add_from_db(void)
 		{
 			LM_ERR("the query returned no result. Each room must have at least one member\n");
 			er_ret = 0;
-			goto error; /* each room must have at least one member*/
+			//goto error; /* each room must have at least one member*/
+			/* un poco bestia igual no seguir cargando el resto de rooms que están correctas?  */
+			imc_release_room(room);
 		}
 		for(j =0; j< m_res->n; j++)
 		{
+			LM_DBG("Adding members to... %s %s\n",name.s, domain.s);
+
 			m_row = &m_res->rows[j];
 			m_row_vals = ROW_VALUES(m_row);
 			
@@ -282,6 +286,8 @@ int add_from_db(void)
 
 		if(m_res)
 		{
+			LM_DBG("free_result m_res 1, room %s %s\n",name.s, domain.s);
+
 			imc_dbf.free_result(imc_db, m_res);
 			m_res = NULL;
 		}
@@ -315,11 +321,13 @@ int add_from_db(void)
 
 	if(r_res)
 	{	
+		LM_DBG("free_result r_res 1, room %s %s\n",name.s, domain.s);
 		imc_dbf.free_result(imc_db, r_res);
 		r_res = NULL;
 	}
 	if(m_res)
 	{	
+		LM_DBG("free_result m_res 2, room %s %s\n",name.s, domain.s);
 		imc_dbf.free_result(imc_db, m_res);
 		m_res = NULL;
 	}

@@ -165,9 +165,9 @@ imc_room_p imc_add_room(str* name, str* domain, int flags)
 	
 	irp->flags  = flags;
 	irp->hashid = core_case_hash(&irp->name, &irp->domain, 0);
-	
-	hidx = imc_get_hentry(irp->hashid, imc_hash_size);
 
+	hidx = imc_get_hentry(irp->hashid, imc_hash_size);
+	
 	lock_get(&_imc_htable[hidx].lock);
 	
 	if(_imc_htable[hidx].rooms!=NULL)
@@ -179,6 +179,8 @@ imc_room_p imc_add_room(str* name, str* domain, int flags)
 		_imc_htable[hidx].rooms = irp;
 	}	
 	
+	LM_DBG("Added room %s %s\n",name->s, domain->s);
+
 	return irp;
 }
 
