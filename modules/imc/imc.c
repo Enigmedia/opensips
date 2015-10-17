@@ -172,13 +172,14 @@ int add_from_db(void)
 	db_res_t *m_res= NULL;
 	db_row_t *m_row = NULL, *r_row = NULL;	
 	db_val_t *m_row_vals, *r_row_vals = NULL;
-	str name, domain;
+	str name, domain, alias;
 	imc_room_p room = NULL;
 	int er_ret = -1;
 	
 	rq_result_cols[0] = &imc_col_name;
 	rq_result_cols[1] = &imc_col_domain;
 	rq_result_cols[2] = &imc_col_flag;
+	rq_result_cols[3] = &imc_col_alias;
 
 	mq_result_cols[0] = &imc_col_username;
 	mq_result_cols[1] = &imc_col_domain;
@@ -194,7 +195,7 @@ int add_from_db(void)
 		return -1;
 	}
 
-	if(imc_dbf.query(imc_db,0, 0, 0, rq_result_cols,0, 3, 0,&r_res)< 0)
+	if(imc_dbf.query(imc_db,0, 0, 0, rq_result_cols,0, 4, 0,&r_res)< 0)
 	{
 		LM_ERR("failed to querry table\n");
 		return -1;
@@ -223,12 +224,28 @@ int add_from_db(void)
 		
 		flag = 	r_row_vals[2].val.int_val;
 		
+		alias.s = 	r_row_vals[3].val.str_val.s;
+		alias.len = strlen(alias.s);
+
 		room = imc_add_room(&name, &domain, flag);
 		if(room == NULL)
 		{
 			LM_ERR("failed to add room\n ");
 			goto error;
 		}
+		if(alias.s != NULL)
+		{
+			room->alias.s = (char*)shm_malloc(alias.len+1);
+			if(room->alias.s==NULL)
+			{
+				LM_ERR("no more shm memory left\n");
+				goto error;
+			}
+			snprintf(room->alias.s,alias.len+1,"%s",alias.s);
+			room->alias.len = alias.len;
+		}
+
+
 		room->database_op = IMC_DATABASE_NOT_TO_SAVE;
 	
 		/* add members */
