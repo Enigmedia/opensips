@@ -117,6 +117,9 @@ int imc_parse_cmd(char *buf, int len, imc_cmd_p cmd)
 	} else if(cmd->name.len==(sizeof("name")-1)
 				&& !strncasecmp(cmd->name.s, "name", cmd->name.len)) {
 		cmd->type = IMC_CMDID_NAME;
+	} else if(cmd->name.len==(sizeof("owner")-1)
+				&& !strncasecmp(cmd->name.s, "owner", cmd->name.len)) {
+		cmd->type = IMC_CMDID_OWNER;
 	} else if(cmd->name.len==(sizeof("help")-1)
 				&& !strncasecmp(cmd->name.s, "help", cmd->name.len)) {
 		cmd->type = IMC_CMDID_HELP;
@@ -355,6 +358,7 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 {
 	imc_room_p room = 0;
 	imc_member_p member = 0;
+	imc_member_p inviter = 0;
 	int flag_member = 0;
 	int size = 0;
 	int i = 0;
@@ -430,6 +434,7 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 		goto error;
 	}			
 	member= imc_get_member(room, &src->user, &src->host);
+	inviter = member;
 
 	if(member==NULL)
 	{
@@ -472,8 +477,8 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	body.s = imc_body_buf;
 	memcpy(body.s, "INVITE from: ", 13);
-	memcpy(body.s+13, member->uri.s + 4, member->uri.len - 4);
-	memcpy(body.s+ 9 + member->uri.len, "(Type: '#accept' or '#deny')", 28);	
+	memcpy(body.s+13, inviter->uri.s + 4, inviter->uri.len - 4);
+	memcpy(body.s+ 9 + inviter->uri.len, "(Type: '#accept' or '#deny')", 28);
 	body.s[body.len] = '\0';			
 
 	LM_DBG("to=[%.*s]\nfrom=[%.*s]\nbody=[%.*s]\n", 
@@ -491,7 +496,7 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 	cback_param->room_domain = room->domain;
 	cback_param->member_name = member->user;
 	cback_param->member_domain = member->domain;
-	cback_param->inv_uri = member->uri;
+	cback_param->inv_uri = inviter->uri;
 	/*?!?! possible race with 'remove user' */
 	result= tmb.t_request(&imc_msg_type,				/* Request Method */
 				&member->uri,							/* Request-URI */
@@ -1030,14 +1035,15 @@ int imc_handle_rename(struct sip_msg* msg, imc_cmd_t *cmd,
 		shm_free(room->alias.s);
 		room->alias.len = 0;
 	}
-	room->alias.s = (char*)shm_malloc(room_alias.len);
+	room->alias.s = (char*)shm_malloc(room_alias.len+1);
 	if(room->alias.s==NULL)
 	{
 		LM_ERR("no more shm memory left\n");
 		goto error;
 	}
-	snprintf(room->alias.s,room_alias.len,"%s",room_alias.s);
+	snprintf(room->alias.s,room_alias.len+1,"%s",room_alias.s);
 	room->alias.len = room_alias.len;
+	room->database_op = IMC_DATABASE_TO_UPDATE;
 
 	body.s = imc_body_buf;
 	snprintf(body.s,IMC_BUF_SIZE,"The alias of room has been modified: %s", room->alias.s);
@@ -1118,6 +1124,167 @@ error:
 		imc_release_room(room);
 	return -1;
 }
+
+
+
+/**
+ *
+ */
+int imc_handle_owner(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst)
+{
+	imc_room_p room = 0;
+	imc_member_p member = 0;
+	imc_member_p new_owner = 0;
+	str room_name;
+	str body;
+
+	str uri = {0, 0};
+	int size =0;
+	int i = 0;
+	int add_domain = 0;
+	int add_sip = 0;
+	struct sip_uri inv_uri;
+
+	size= cmd->param[0].len+2;
+	add_domain = 1;
+	while (i<size )
+	{
+		if(cmd->param[0].s[i]== '@')
+		{
+			add_domain =0;
+			break;
+		}
+		i++;
+	}
+
+	if(add_domain)
+		size += dst->host.len;
+	if(cmd->param[0].len<=4 || strncasecmp(cmd->param[0].s, "sip:", 4)!=0)
+	{
+		size+= 4;
+		add_sip = 1;
+	}
+
+	uri.s = (char*)pkg_malloc(size*sizeof(char));
+	if(uri.s == NULL)
+	{
+		LM_ERR("no more pkg memory\n");
+		goto error;
+	}
+
+	size= 0;
+	if(add_sip)
+	{
+		strcpy(uri.s, "sip:");
+		size = 4;
+	}
+
+	memcpy(uri.s+size, cmd->param[0].s, cmd->param[0].len);
+	size+= cmd->param[0].len;
+
+	if(add_domain)
+	{
+		uri.s[size] = '@';
+		size++;
+		memcpy(uri.s+size, dst->host.s, dst->host.len);
+		size+= dst->host.len;
+	}
+	uri.len = size;
+
+	if(parse_uri(uri.s, uri.len, &inv_uri)<0)
+	{
+		LM_ERR("invalid uri [%.*s]\n", uri.len, uri.s);
+		pkg_free(uri.s);
+		goto error;
+	}
+
+
+	room_name = cmd->param[1].s?cmd->param[1]:dst->user;
+
+	if(room_name.s == NULL)
+	{
+		LM_ERR("room name not present\n");
+		pkg_free(uri.s);
+		goto error;
+	}
+
+	room= imc_get_room(&room_name, &dst->host);
+	if(room== NULL || (room->flags&IMC_ROOM_DELETED))
+	{
+		LM_ERR("room [%.*s] does not exist!\n",	room_name.len, room_name.s);
+		pkg_free(uri.s);
+		goto error;
+	}
+
+	/* verify is the user is a member of the room, or invited to this room*/
+	member= imc_get_member(room, &src->user, &src->host);
+
+	if(member== NULL)
+	{
+		LM_ERR("user [%.*s] is not a member of room [%.*s]!\n",
+				src->user.len, src->user.s,	room_name.len, room_name.s);
+		pkg_free(uri.s);
+		goto error;
+	}
+
+
+	if(!(member->flags & IMC_MEMBER_OWNER))
+	{
+		LM_ERR("user [%.*s] is not owner of room [%.*s] -- cannot change the owner"
+				"!\n", src->user.len, src->user.s, room_name.len, room_name.s);
+		goto error;
+	}
+
+
+	new_owner= imc_get_member(room, &inv_uri.user, &inv_uri.host);
+	if(new_owner== NULL)
+	{
+		LM_ERR("user [%.*s] is not member of room [%.*s]!\n",
+				inv_uri.user.len, inv_uri.user.s, room_name.len, room_name.s);
+		pkg_free(uri.s);
+		goto error;
+	}
+
+
+	/* send message to the new owner */
+	body.s = "You are the new owner of this room";
+	body.len = strlen(body.s);
+
+	LM_DBG("to: [%.*s]\nfrom: [%.*s]\nbody: [%.*s]\n",
+			new_owner->uri.len, new_owner->uri.s , room->uri.len, room->uri.s,
+			body.len, body.s);
+	imc_send_message(&room->uri, &new_owner->uri, &imc_hdr_ctype, &body);
+
+
+	/* send message to the old owner */
+	body.s = "The new owner of this room is:";
+	body.s   = imc_body_buf;
+	body.len = snprintf(body.s, IMC_BUF_SIZE,
+			"The new owner of this room is: '%.*s'",
+			cmd->param[0].len, cmd->param[0].s);
+
+	LM_DBG("to: [%.*s]\nfrom: [%.*s]\nbody: [%.*s]\n",
+			member->uri.len, member->uri.s , room->uri.len, room->uri.s,
+			body.len, body.s);
+	imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
+
+
+	new_owner->flags |= IMC_MEMBER_OWNER;
+	new_owner->database_op = IMC_DATABASE_TO_UPDATE;
+	member->flags &= ~IMC_MEMBER_OWNER;
+	member->database_op = IMC_DATABASE_TO_UPDATE;
+
+	imc_release_room(room);
+
+	return 0;
+
+error:
+	if(room!=NULL)
+		imc_release_room(room);
+	return -1;
+}
+
 
 /**
  *

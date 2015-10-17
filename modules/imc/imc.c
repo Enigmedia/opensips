@@ -73,6 +73,7 @@ str imc_col_domain   = str_init("domain");
 str imc_col_flag     = str_init("flag");
 str imc_col_room     = str_init("room");
 str imc_col_name     = str_init("name");
+str imc_col_alias    = str_init("alias");
 
 imc_hentry_p _imc_htable = NULL;
 int imc_hash_size = 4;
@@ -486,17 +487,56 @@ void save_db(void)
 	rq_vals[2].type = DB_INT;
 	rq_vals[2].nul = 0;
 
+	rq_cols[3] = &imc_col_alias;
+	rq_vals[3].type = DB_STR;
+	rq_vals[3].nul = 0;
+
 	for(i=0; i<imc_hash_size; i++)
 	{
 		irp = _imc_htable[i].rooms;
 
 		while(irp)
 		{
-			if(irp->database_op==IMC_DATABASE_TO_SAVE)
+			if(irp->database_op==IMC_DATABASE_TO_SAVE || irp->database_op == IMC_DATABASE_TO_UPDATE)
 			{
+				if(irp->database_op == IMC_DATABASE_TO_UPDATE)
+				{
+					db_key_t rq2_cols[2];
+					db_val_t rq2_vals[2];
+
+					rq2_cols[0] = &imc_col_name;
+					rq2_vals[0].type = DB_STR;
+					rq2_vals[0].nul = 0;
+
+					rq2_cols[1] = &imc_col_domain;
+					rq2_vals[1].type = DB_STR;
+					rq2_vals[1].nul = 0;
+
+					if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
+					{
+						LM_ERR("use_table failed\n");
+						return;
+					}
+
+					LM_DBG("updating room (=delete first)");
+					rq2_vals[0].val.str_val = irp->name;
+					rq2_vals[1].val.str_val = irp->domain;
+					if(imc_dbf.delete(imc_db, rq2_cols, 0, rq2_vals, 2)<0)
+					{
+						LM_ERR("failed deleting into table %s, room %d %.*s \n", rooms_table.s, i, irp->name.len, irp->name.s);
+						//return;
+					}
+					else
+					{
+						LM_DBG("deleting table %s, room %d %.*s\n", rooms_table.s, i, irp->name.len, irp->name.s);
+					}
+				}
+
+
 				rq_vals[0].val.str_val = irp->name;
 				rq_vals[1].val.str_val = irp->domain;
 				rq_vals[2].val.int_val = irp->flags;
+				rq_vals[3].val.str_val = irp->alias;
 
 				if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
 				{
@@ -504,9 +544,9 @@ void save_db(void)
 					return;
 				}
 
-				if(imc_dbf.insert(imc_db, rq_cols, rq_vals, 3)<0)
+				if(imc_dbf.insert(imc_db, rq_cols, rq_vals, 4)<0)
 				{
-					LM_WARN("failed to insert into table %s, room %d %.*s (maybe the value already was, don't panic...) \n", rooms_table.s, i, irp->name.len, irp->name.s);
+					LM_ERR("failed to insert into table %s, room %d %.*s \n", rooms_table.s, i, irp->name.len, irp->name.s);
 					//return;
 				}
 				else
@@ -724,6 +764,14 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				LM_ERR("failed to handle 'name'\n");
 				goto error;
 			}
+		break;
+		case IMC_CMDID_OWNER:
+			if(imc_handle_owner(msg, &cmd, pfrom_uri, pto_uri)<0)
+			{
+				LM_ERR("failed to handle 'owner'\n");
+				goto error;
+			}
+			write_to_bbdd = 1;
 		break;
 		case IMC_CMDID_HELP:
 			if(imc_handle_help(msg, &cmd, &pfrom->uri,

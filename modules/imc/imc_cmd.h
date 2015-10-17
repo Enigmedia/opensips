@@ -48,9 +48,10 @@
 #define IMC_CMDID_DESTROY	8
 #define IMC_CMDID_RENAME	9
 #define IMC_CMDID_NAME	 	10
-#define IMC_CMDID_HELP		11
-#define IMC_CMDID_LIST		12
-#define IMC_CMDID_UNKNOWN	13
+#define IMC_CMDID_OWNER	 	11
+#define IMC_CMDID_HELP		12
+#define IMC_CMDID_LIST		13
+#define IMC_CMDID_UNKNOWN	14
 
 #define IMC_CMD_CREATE	"create"
 #define IMC_CMD_INVITE	"invite"
@@ -63,6 +64,7 @@
 #define IMC_CMD_LIST	"list"
 #define IMC_CMD_RENAME	"rename"
 #define IMC_CMD_NAME	"name"
+#define IMC_CMD_OWNER	"owner"
 
 #define IMC_ROOM_PRIVATE		"private"
 #define IMC_ROOM_PRIVATE_LEN	(sizeof(IMC_ROOM_PRIVATE)-1)
@@ -85,10 +87,12 @@ list members is a conference room\r\n\
 exit from a conference room\r\n\
 "IMC_CMD_START_STR IMC_CMD_DESTROY" [<room_name>] - \
 destroy conference room\r\n\
-"IMC_CMD_RENAME_STR IMC_CMD_RENAME" room_alias [<room_name>] - \
+"IMC_CMD_START_STR IMC_CMD_RENAME" room_alias [<room_name>] - \
 set room alias\r\n\
-"IMC_CMD_NAME_STR IMC_CMD_NAME" [<room_name>] - \
-get room alias\r\n"
+"IMC_CMD_START_STR IMC_CMD_NAME" [<room_name>] - \
+get room alias\r\n\
+"IMC_CMD_START_STR IMC_CMD_OWNER" <user_name> [<room_name>] - \
+set user as owner\r\n"
 
 #define IMC_HELP_MSG_LEN (sizeof(IMC_HELP_MSG)-1)
 
@@ -124,6 +128,8 @@ int imc_handle_destroy(struct sip_msg* msg, imc_cmd_t *cmd,
 int imc_handle_rename(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_name(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst);
+int imc_handle_owner(struct sip_msg* msg, imc_cmd_t *cmd,
 		struct sip_uri *src, struct sip_uri *dst);
 int imc_handle_unknown(struct sip_msg* msg, imc_cmd_t *cmd,
 		str *src, str *dst);

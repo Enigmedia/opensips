@@ -218,7 +218,6 @@ imc_room_p imc_get_room(str* name, str* domain)
 	}
 	
 	hashid = core_case_hash(name, domain, 0);
-	LM_DBG("KKK after core_case_hash\n");
 	
 	hidx = imc_get_hentry(hashid, imc_hash_size);
 
@@ -232,14 +231,12 @@ imc_room_p imc_get_room(str* name, str* domain)
 				&& !strncasecmp(irp->name.s, name->s, name->len)
 				&& !strncasecmp(irp->domain.s, domain->s, domain->len))
 		{
-			LM_DBG("KKK after core_case_hash 2\n");
-			LM_DBG("KKK room found: %s %s\n", name->s, domain->s);
+			LM_DBG("room found: %s %s\n", name->s, domain->s);
 			return irp;
 		}
 		irp = irp->next;
 	}
 
-	LM_DBG("KKK after core_case_hash 3\n");
 	/* no room */
 	lock_release(&_imc_htable[hidx].lock);
 
