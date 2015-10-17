@@ -111,6 +111,12 @@ int imc_parse_cmd(char *buf, int len, imc_cmd_p cmd)
 	} else if(cmd->name.len==(sizeof("destroy")-1)
 				&& !strncasecmp(cmd->name.s, "destroy", cmd->name.len)) {
 		cmd->type = IMC_CMDID_DESTROY;
+	} else if(cmd->name.len==(sizeof("rename")-1)
+				&& !strncasecmp(cmd->name.s, "rename", cmd->name.len)) {
+		cmd->type = IMC_CMDID_RENAME;
+	} else if(cmd->name.len==(sizeof("name")-1)
+				&& !strncasecmp(cmd->name.s, "name", cmd->name.len)) {
+		cmd->type = IMC_CMDID_NAME;
 	} else if(cmd->name.len==(sizeof("help")-1)
 				&& !strncasecmp(cmd->name.s, "help", cmd->name.len)) {
 		cmd->type = IMC_CMDID_HELP;
@@ -956,6 +962,154 @@ int imc_handle_destroy(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	LM_DBG("deleting room\n");
 	imc_del_room(&room_name, &dst->host, 1);
+
+	return 0;
+
+error:
+	if(room!=NULL)
+		imc_release_room(room);
+	return -1;
+}
+
+
+/**
+ *
+ */
+int imc_handle_rename(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst)
+{
+	imc_room_p room = 0;
+	imc_member_p member = 0;
+	str room_name;
+	str room_alias;
+	str body;
+
+	room_alias = cmd->param[0];
+	room_name = cmd->param[1].s?cmd->param[1]:dst->user;
+
+	if(room_name.s == NULL)
+	{
+		LM_ERR("room name not present\n");
+		goto error;
+	}
+	if(room_alias.s == NULL)
+	{
+		LM_ERR("room alias not present\n");
+		goto error;
+	}
+
+	room= imc_get_room(&room_name, &dst->host);
+	if(room== NULL || (room->flags&IMC_ROOM_DELETED))
+	{
+		LM_ERR("room [%.*s] does not exist!\n",	room_name.len, room_name.s);
+		goto error;
+	}
+
+	/* verify is the user is a member of the room, or invited to this room*/
+	member= imc_get_member(room, &src->user, &src->host);
+
+	if(member== NULL)
+	{
+		LM_ERR("user [%.*s] is not a member of room [%.*s]!\n",
+				src->user.len, src->user.s,	room_name.len, room_name.s);
+		goto error;
+	}
+
+	/*
+	if(!(member->flags & IMC_MEMBER_OWNER))
+	{
+		LM_ERR("user [%.*s] is not owner of room [%.*s] -- cannot destroy it"
+				"!\n", src->user.len, src->user.s, room_name.len, room_name.s);
+		goto error;
+	}
+	*/
+
+	LM_DBG("modifying room name %s[%i]\n", room_alias.s,room_alias.len);
+	if(room->alias.s != NULL)
+	{
+		shm_free(room->alias.s);
+		room->alias.len = 0;
+	}
+	room->alias.s = (char*)shm_malloc(room_alias.len);
+	if(room->alias.s==NULL)
+	{
+		LM_ERR("no more shm memory left\n");
+		goto error;
+	}
+	snprintf(room->alias.s,room_alias.len,"%s",room_alias.s);
+	room->alias.len = room_alias.len;
+
+	body.s = imc_body_buf;
+	snprintf(body.s,IMC_BUF_SIZE,"The alias of room has been modified: %s", room->alias.s);
+	body.len = strlen(body.s);
+
+	/* braodcast message */
+	imc_room_broadcast(room, &imc_hdr_ctype, &body);
+
+	imc_release_room(room);
+
+	return 0;
+
+error:
+	if(room!=NULL)
+		imc_release_room(room);
+	return -1;
+}
+
+
+/**
+ *
+ */
+int imc_handle_name(struct sip_msg* msg, imc_cmd_t *cmd,
+		struct sip_uri *src, struct sip_uri *dst)
+{
+	imc_room_p room = 0;
+	imc_member_p member = 0;
+	str room_name;
+	str body;
+
+	room_name = cmd->param[0].s?cmd->param[0]:dst->user;
+
+	if(room_name.s == NULL)
+	{
+		LM_ERR("room name not present\n");
+		goto error;
+	}
+
+	room= imc_get_room(&room_name, &dst->host);
+	if(room== NULL || (room->flags&IMC_ROOM_DELETED))
+	{
+		LM_ERR("room [%.*s] does not exist!\n",	room_name.len, room_name.s);
+		goto error;
+	}
+
+	/* verify is the user is a member of the room, or invited to this room*/
+	member= imc_get_member(room, &src->user, &src->host);
+
+	if(member== NULL)
+	{
+		LM_ERR("user [%.*s] is not a member of room [%.*s]!\n",
+				src->user.len, src->user.s,	room_name.len, room_name.s);
+		goto error;
+	}
+
+	/*
+	if(!(member->flags & IMC_MEMBER_OWNER))
+	{
+		LM_ERR("user [%.*s] is not owner of room [%.*s] -- cannot destroy it"
+				"!\n", src->user.len, src->user.s, room_name.len, room_name.s);
+		goto error;
+	}
+	*/
+
+	body.s = imc_body_buf;
+	snprintf(body.s,IMC_BUF_SIZE,"The alias of the room is: %s", room->alias.s);
+	body.len = strlen(body.s);
+
+	/* braodcast message */
+	imc_room_broadcast(room, &imc_hdr_ctype, &body);
+
+	imc_release_room(room);
 
 	return 0;
 

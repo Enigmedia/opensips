@@ -80,6 +80,7 @@ typedef struct _imc_room
 	str uri;
 	str name;
 	str domain;
+	str alias;
 	int flags;
 	int nr_of_members;
 	char database_op; // flag que indica si hay que grabar a bbdd o no. =0 es que hay que grabar
@@ -101,6 +102,7 @@ int imc_del_member(imc_room_p room, str* user, str* domain, char erase_database)
 imc_room_p imc_add_room(str* name, str* domain, int flags);
 imc_room_p imc_get_room(str* name, str* domain);
 int imc_del_room(str* name, str* domain, char erase_database);
+int imc_set_room_alias(str* name, str* domain, char erase_database);
 int imc_release_room(imc_room_p room);
 
 int imc_htable_init();

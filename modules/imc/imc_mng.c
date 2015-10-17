@@ -131,6 +131,8 @@ imc_room_p imc_add_room(str* name, str* domain, int flags)
 	int size;
 	int hidx;
 	
+	LM_DBG("Adding room %s %s\n",name->s, domain->s);
+
 	if(name == NULL || name->s==NULL || name->len<=0
 			|| domain == NULL || domain->s==NULL || domain->len<=0)
 	{
@@ -156,7 +158,7 @@ imc_room_p imc_add_room(str* name, str* domain, int flags)
 	memcpy(irp->uri.s+5+name->len, domain->s, domain->len);
 	irp->uri.s[irp->uri.len] = '\0';
 
-	irp->name.len = name->len;
+	irp->name.len = name->len; // Vaya pachulín tienen aquí... len = 8, s=12345678@domain.com
 	irp->name.s = irp->uri.s+4;
 	irp->domain.len = domain->len;
 	irp->domain.s = irp->uri.s+5+name->len;
@@ -216,6 +218,7 @@ imc_room_p imc_get_room(str* name, str* domain)
 	}
 	
 	hashid = core_case_hash(name, domain, 0);
+	LM_DBG("KKK after core_case_hash\n");
 	
 	hidx = imc_get_hentry(hashid, imc_hash_size);
 
@@ -229,11 +232,14 @@ imc_room_p imc_get_room(str* name, str* domain)
 				&& !strncasecmp(irp->name.s, name->s, name->len)
 				&& !strncasecmp(irp->domain.s, domain->s, domain->len))
 		{
+			LM_DBG("KKK after core_case_hash 2\n");
+			LM_DBG("KKK room found: %s %s\n", name->s, domain->s);
 			return irp;
 		}
 		irp = irp->next;
 	}
 
+	LM_DBG("KKK after core_case_hash 3\n");
 	/* no room */
 	lock_release(&_imc_htable[hidx].lock);
 
@@ -358,6 +364,10 @@ int imc_del_room(str* name, str* domain, char erase_database)
 				}
 			}
 
+			if(irp->alias.s != NULL)
+			{
+				shm_free(irp->alias.s);
+			}
 			shm_free(irp);
 
 			goto done;
@@ -366,6 +376,139 @@ int imc_del_room(str* name, str* domain, char erase_database)
 	}
 
 done:	
+	lock_release(&_imc_htable[hidx].lock);
+
+	return 0;
+}
+
+
+
+/**
+ * delete room
+ * erase_database == 1, borra también de base de datos
+ */
+int imc_set_room_alias(str* name, str* domain, char erase_database)
+{
+	imc_room_p irp = NULL;
+	imc_member_p imp=NULL, imp_temp=NULL;
+	unsigned int hashid;
+	int hidx;
+
+	db_key_t mq_cols[3];
+	db_val_t mq_vals[3];
+	db_key_t rq_cols[2];
+	db_val_t rq_vals[2];
+
+	mq_cols[0] = &imc_col_username;
+	mq_vals[0].type = DB_STR;
+	mq_vals[0].nul = 0;
+
+	mq_cols[1] = &imc_col_domain;
+	mq_vals[1].type = DB_STR;
+	mq_vals[1].nul = 0;
+
+	mq_cols[2] = &imc_col_room;
+	mq_vals[2].type = DB_STR;
+	mq_vals[2].nul = 0;
+
+
+	rq_cols[0] = &imc_col_name;
+	rq_vals[0].type = DB_STR;
+	rq_vals[0].nul = 0;
+
+	rq_cols[1] = &imc_col_domain;
+	rq_vals[1].type = DB_STR;
+	rq_vals[1].nul = 0;
+
+
+	if(name == NULL || name->s==NULL || name->len<=0
+			|| domain == NULL || domain->s==NULL || domain->len<=0)
+	{
+		LM_ERR("invalid parameters\n");
+		return -1;
+	}
+
+	hashid = core_case_hash(name, domain, 0);
+
+	hidx = imc_get_hentry(hashid, imc_hash_size);
+
+	lock_get(&_imc_htable[hidx].lock);
+	irp = _imc_htable[hidx].rooms;
+	while(irp)
+	{
+		if(irp->hashid==hashid && irp->name.len==name->len
+				&& irp->domain.len==domain->len
+				&& !strncasecmp(irp->name.s, name->s, name->len)
+				&& !strncasecmp(irp->domain.s, domain->s, domain->len))
+		{
+			if(irp->prev==NULL)
+				_imc_htable[hidx].rooms = irp->next;
+			else
+				irp->prev->next = irp->next;
+			if(irp->next!=NULL)
+				irp->next->prev = irp->prev;
+
+			/* delete members */
+			if(imc_dbf.use_table(imc_db, &members_table)< 0)
+			{
+				LM_ERR("use table failed\n ");
+				goto done;
+			}
+			imp = irp->members;
+			while(imp){
+
+				if(erase_database == 1)
+				{
+					mq_vals[0].val.str_val = imp->user;
+					mq_vals[1].val.str_val = imp->domain;
+					mq_vals[2].val.str_val = irp->uri;
+					if(imc_dbf.delete(imc_db, mq_cols, 0, mq_vals, 3)<0)
+					{
+						LM_ERR("failed to delete from table %s, imp %.*s, uri: %.*s \n",
+														members_table.s, imp->user.len, imp->user.s, irp->uri.len, irp->uri.s);
+						goto done;
+					}
+					else
+					{
+						LM_DBG("delete from table %s, imp %.*s, uri: %.*s \n",
+														members_table.s, imp->user.len, imp->user.s, irp->uri.len, irp->uri.s);
+					}
+				}
+
+				imp_temp = imp->next;
+				shm_free(imp);
+				imp = imp_temp;
+			}
+
+			if(erase_database == 1)
+			{
+				rq_vals[0].val.str_val = irp->name;
+				rq_vals[1].val.str_val = irp->domain;
+
+				if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
+				{
+					LM_ERR("use_table failed\n");
+					goto done;
+				}
+				if(imc_dbf.delete(imc_db, rq_cols, 0, rq_vals, 2)<0)
+				{
+					LM_ERR("failed from delete in table %s, room %.*s \n", rooms_table.s, irp->name.len, irp->name.s);
+					goto done;
+				}
+				else
+				{
+					LM_DBG("deleted from table %s, room %.*s \n", rooms_table.s, irp->name.len, irp->name.s);
+				}
+			}
+
+			shm_free(irp);
+
+			goto done;
+		}
+		irp = irp->next;
+	}
+
+done:
 	lock_release(&_imc_htable[hidx].lock);
 
 	return 0;

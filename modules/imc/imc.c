@@ -250,7 +250,7 @@ int add_from_db(void)
 
 		if(m_res && m_res->n <=0)
 		{
-			LM_INFO("the query returned no result\n");
+			LM_ERR("the query returned no result. Each room must have at least one member\n");
 			er_ret = 0;
 			goto error; /* each room must have at least one member*/
 		}
@@ -709,6 +709,21 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				goto error;
 			}
 			write_to_bbdd = 1;
+		break;
+		case IMC_CMDID_RENAME:
+			if(imc_handle_rename(msg, &cmd, pfrom_uri, pto_uri)<0)
+			{
+				LM_ERR("failed to handle 'rename'\n");
+				goto error;
+			}
+			write_to_bbdd = 1;
+		break;
+		case IMC_CMDID_NAME:
+			if(imc_handle_name(msg, &cmd, pfrom_uri, pto_uri)<0)
+			{
+				LM_ERR("failed to handle 'name'\n");
+				goto error;
+			}
 		break;
 		case IMC_CMDID_HELP:
 			if(imc_handle_help(msg, &cmd, &pfrom->uri,
