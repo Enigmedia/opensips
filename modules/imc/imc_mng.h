@@ -1,5 +1,5 @@
 /*
- * $Id: imc_mng.h 5901 2009-07-21 07:45:05Z bogdan_iancu $
+ * $Id$
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -37,11 +37,11 @@
 #include "../../str.h"
 #include "../../parser/parse_from.h"
 
-#define IMC_MEMBER_OWNER	(1<<0)
-#define IMC_MEMBER_ADMIN	(1<<1)
-#define IMC_MEMBER_INVITED	(1<<2)
-#define IMC_MEMBER_DELETED  (1<<3)
-#define IMC_MEMBER_SKIP     (1<<4)
+#define IMC_MEMBER_OWNER	1<<0
+#define IMC_MEMBER_ADMIN	1<<1
+#define IMC_MEMBER_INVITED	1<<2
+#define IMC_MEMBER_DELETED  1<<3
+#define IMC_MEMBER_SKIP     1<<4
 
 #define IMC_DATABASE_TO_SAVE  0
 #define IMC_DATABASE_NOT_TO_SAVE  1

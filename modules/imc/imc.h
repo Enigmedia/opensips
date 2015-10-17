@@ -1,5 +1,5 @@
 /*
- * $Id: imc.h 5901 2009-07-21 07:45:05Z bogdan_iancu $
+ * $Id$
  *
  * imc module - instant messaging conferencing implementation
  *

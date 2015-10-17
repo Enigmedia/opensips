@@ -1,5 +1,5 @@
 /*
- * $Id: imc.c 8628 2011-12-19 14:20:30Z bogdan_iancu $
+ * $Id$
  *
  * imc module - instant messaging conferencing implementation
  *
@@ -17,8 +17,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * History:
@@ -66,15 +66,15 @@ static str db_url  = {NULL, 0};
 str outbound_proxy = {NULL, 0};
 int imc_db_mode = DB_MODE_SHUTDOWN;
 
-str rooms_table   = str_init("imc_rooms");
-str members_table = str_init("imc_members");
+static str rooms_table   = str_init("imc_rooms");
+static str members_table = str_init("imc_members");
 
-str imc_col_username = str_init("username");
-str imc_col_domain   = str_init("domain");
-str imc_col_flag     = str_init("flag");
-str imc_col_room     = str_init("room");
-str imc_col_name     = str_init("name");
-str imc_col_alias    = str_init("alias");
+static str imc_col_username = str_init("username");
+static str imc_col_domain   = str_init("domain");
+static str imc_col_flag     = str_init("flag");
+static str imc_col_room     = str_init("room");
+static str imc_col_name     = str_init("name");
+static str imc_col_alias    = str_init("alias");
 
 imc_hentry_p _imc_htable = NULL;
 int imc_hash_size = 4;
@@ -89,8 +89,6 @@ static int imc_manager(struct sip_msg*, char *, char *);
 
 static struct mi_root* imc_mi_list_rooms(struct mi_root* cmd, void* param);
 static struct mi_root* imc_mi_list_members(struct mi_root* cmd, void* param);
-
-
 
 void destroy(void);
 
@@ -170,12 +168,12 @@ int add_from_db(void)
 	db_val_t mquery_vals[2];
 	db_res_t *r_res= NULL;
 	db_res_t *m_res= NULL;
-	db_row_t *m_row = NULL, *r_row = NULL;	
+	db_row_t *m_row = NULL, *r_row = NULL;
 	db_val_t *m_row_vals, *r_row_vals = NULL;
 	str name, domain, alias;
 	imc_room_p room = NULL;
 	int er_ret = -1;
-	
+
 	rq_result_cols[0] = &imc_col_name;
 	rq_result_cols[1] = &imc_col_domain;
 	rq_result_cols[2] = &imc_col_flag;
@@ -188,7 +186,7 @@ int add_from_db(void)
 	mquery_cols[0] = &imc_col_room;
 	mquery_vals[0].type = DB_STR;
 	mquery_vals[0].nul = 0;
-	
+
 	if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
 	{
 		LM_ERR("use_table failed\n");
@@ -215,13 +213,13 @@ int add_from_db(void)
 		/*add rooms*/
 		r_row = &r_res->rows[i];
 		r_row_vals = ROW_VALUES(r_row);
-	
+
 		name.s = 	r_row_vals[0].val.str_val.s;
 		name.len = strlen(name.s);
-		
+
 		domain.s = 	r_row_vals[1].val.str_val.s;
 		domain.len = strlen(domain.s);
-		
+
 		flag = 	r_row_vals[2].val.int_val;
 		
 		alias.s = 	r_row_vals[3].val.str_val.s;
@@ -256,8 +254,8 @@ int add_from_db(void)
 		}
 
 		mquery_vals[0].val.str_val= room->uri;
-		
-		if(imc_dbf.query(imc_db, mquery_cols, 0, mquery_vals, mq_result_cols, 
+
+		if(imc_dbf.query(imc_db, mquery_cols, 0, mquery_vals, mq_result_cols,
 					1, 3, 0, &m_res)< 0)
 		{
 			LM_ERR("failed to querry table\n");
@@ -266,7 +264,7 @@ int add_from_db(void)
 
 		if(m_res && m_res->n <=0)
 		{
-			LM_ERR("the query returned no result. Each room must have at least one member\n");
+			LM_INFO("the query returned no result. Each room must have at least one member\n");
 			er_ret = 0;
 			//goto error; /* each room must have at least one member*/
 			/* un poco bestia igual no seguir cargando el resto de rooms que están correctas?  */
@@ -278,15 +276,15 @@ int add_from_db(void)
 
 			m_row = &m_res->rows[j];
 			m_row_vals = ROW_VALUES(m_row);
-			
+
 			name.s = m_row_vals[0].val.str_val.s;
 			name.len = strlen(name.s);
-			
+
 			domain.s = m_row_vals[1].val.str_val.s;
 			domain.len = strlen(domain.s);
-			
+
 			flag = m_row_vals[2].val.int_val;
-			
+
 			LM_DBG("adding memeber: [name]=%.*s [domain]=%.*s"
 					" in [room]= %.*s\n",name.len, name.s, domain.len,domain.s,
 					room->uri.len, room->uri.s);
@@ -298,7 +296,7 @@ int add_from_db(void)
 				goto error;
 			}
 			member->database_op = IMC_DATABASE_NOT_TO_SAVE;
-			imc_release_room(room);	
+			imc_release_room(room);
 		}
 
 		if(m_res)
@@ -322,7 +320,7 @@ int add_from_db(void)
 		LM_ERR("failed to delete information from db\n");
 		goto error;
 	}
-	
+
 	if(imc_dbf.use_table(imc_db, &rooms_table)< 0)
 	{
 		LM_ERR("use table failed\n ");
@@ -337,13 +335,13 @@ int add_from_db(void)
 	*/
 
 	if(r_res)
-	{	
+	{
 		LM_DBG("free_result r_res 1, room %s %s\n",name.s, domain.s);
 		imc_dbf.free_result(imc_db, r_res);
 		r_res = NULL;
 	}
 	if(m_res)
-	{	
+	{
 		LM_DBG("free_result m_res 2, room %s %s\n",name.s, domain.s);
 		imc_dbf.free_result(imc_db, m_res);
 		m_res = NULL;
@@ -366,7 +364,7 @@ error:
 		imc_release_room(room);
 	return er_ret;
 
-}	
+}
 
 
 static int mod_init(void)
@@ -405,7 +403,7 @@ static int mod_init(void)
 	/*  binding to mysql module */
 	init_db_url( db_url , 0 /*cannot be null*/);
 	LM_DBG("db_url=%s/%d/%p\n", ZSW(db_url.s), db_url.len, db_url.s);
-	
+
 	if (db_bind_mod(&db_url, &imc_dbf))
 	{
 		LM_DBG("database module not found\n");
@@ -424,7 +422,7 @@ static int mod_init(void)
 		LM_ERR("failed to get information from db\n");
 		return -1;
 	}
-	
+
 	/* load TM API */
 	if (load_tm_api(&tmb)!=0) {
 		LM_ERR("unable to load tm api\n");
@@ -432,11 +430,11 @@ static int mod_init(void)
 	}
 
 	imc_cmd_start_char = imc_cmd_start_str.s[0];
-	
+
 	if(imc_db)
 		imc_dbf.close(imc_db);
 	imc_db = NULL;
-	
+
 	return 0;
 }
 
@@ -444,7 +442,7 @@ static int mod_init(void)
  * child init
  */
 static int child_init(int rank)
-{	
+{
 	if (imc_dbf.init==0)
 	{
 		LM_ERR("database not bound\n");
@@ -685,15 +683,15 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 		LM_ERR("failed to parse r-uri\n");
 		goto error;
 	}
-	
+
 	pto_uri=&msg->parsed_uri;
-	
+
 	if(parse_from_header(msg)<0)
 	{
-		LM_ERR("failed to parse  From header\n");
+		LM_ERR("failed to parse From header\n");
 		goto error;
 	}
-	pfrom = (struct to_body*)msg->from->parsed;	
+	pfrom = (struct to_body*)msg->from->parsed;
 	if(parse_uri(pfrom->uri.s, pfrom->uri.len, &from_uri)<0){
 		LM_ERR("failed to parse From URI\n");
 		goto error;
@@ -837,7 +835,7 @@ static int imc_manager(struct sip_msg* msg, char *str1, char *str2)
 				goto error;
 			}
 		}
-									
+
 		goto done;
 	}
 
@@ -867,7 +865,7 @@ done:
 
 error:
 
-	return -1;	
+	return -1;
 }
 
 
@@ -910,8 +908,9 @@ static struct mi_root* imc_mi_list_rooms(struct mi_root* cmd_tree, void* param)
 	if(rpl_tree == NULL)
 		return 0;
 	rpl = &rpl_tree->node;
+	rpl->flags |= MI_IS_ARRAY;
 
-	for(i=0; i<imc_hash_size; i++) 
+	for(i=0; i<imc_hash_size; i++)
 	{
 		lock_get(&_imc_htable[i].lock);
 		irp = _imc_htable[i].rooms;
@@ -930,11 +929,11 @@ static struct mi_root* imc_mi_list_rooms(struct mi_root* cmd_tree, void* param)
 				if(attr == NULL)
 					goto error;
 
-				attr= add_mi_attr(node, MI_DUP_VALUE, "OWNER", 5, 
+				attr= add_mi_attr(node, MI_DUP_VALUE, "OWNER", 5,
 						irp->members->uri.s, irp->members->uri.len);
 				if(attr == NULL)
 					goto error;
-					
+
 				irp = irp->next;
 			}
 		lock_release(&_imc_htable[i].lock);
@@ -968,7 +967,7 @@ static struct mi_root* imc_mi_list_members(struct mi_root* cmd_tree,
 	node= cmd_tree->node.kids;
 	if(node == NULL|| node->next!=NULL)
 		return 0;
-	
+
 	/* room name */
 	room_name.s = rnbuf;
 	room_name.len= node->value.len;
@@ -1000,11 +999,11 @@ static struct mi_root* imc_mi_list_members(struct mi_root* cmd_tree,
 	if(rpl_tree == NULL)
 		return 0;
 
-	node_r = add_mi_node_child( &rpl_tree->node, MI_DUP_VALUE, "ROOM", 4,
-		room_name.s, room_name.len);
+	node_r = add_mi_node_child( &rpl_tree->node, MI_IS_ARRAY|MI_DUP_VALUE,
+		"ROOM", 4, room_name.s, room_name.len);
 	if(node_r == NULL)
 		goto error;
-	
+
 
 	imp = room->members;
 	i=0;
@@ -1017,7 +1016,7 @@ static struct mi_root* imc_mi_list_members(struct mi_root* cmd_tree,
 			goto error;
 		imp = imp->next;
 	}
-	
+
 	p = int2str(i, &len);
 	attr= add_mi_attr(node_r, MI_DUP_VALUE, "NR_OF_MEMBERS", 13, p, len);
 	if(attr == 0)
@@ -1032,5 +1031,3 @@ error:
 	free_mi_tree(rpl_tree);
 	return 0;
 }
-
-
