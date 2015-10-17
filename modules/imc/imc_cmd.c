@@ -323,7 +323,7 @@ int imc_handle_join(struct sip_msg* msg, imc_cmd_t *cmd,
 		{
 			LM_ERR("attept to join private room [%.*s] from user [%.*s]\n",
 					room_name.len, room_name.s,	src->user.len, src->user.s);
-			goto build_inform;
+			goto error;
 
 		}
 
