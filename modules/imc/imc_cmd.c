@@ -478,7 +478,7 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 		goto error;	
 	}
 	
-	body.len = 13 + inviter->uri.len - 4/* sip: */ + 28;
+	body.len = 13 + inviter->uri.len /* sip: */ + 28;
 	if(body.len>=IMC_BUF_SIZE || member->uri.len>=IMC_BUF_SIZE
 			|| room->uri.len>=IMC_BUF_SIZE)
 	{
@@ -488,8 +488,8 @@ int imc_handle_invite(struct sip_msg* msg, imc_cmd_t *cmd,
 
 	body.s = imc_body_buf;
 	memcpy(body.s, "INVITE from: ", 13);
-	memcpy(body.s+13, inviter->uri.s + 4, inviter->uri.len - 4);
-	memcpy(body.s+ 9 + inviter->uri.len, "(Type: '#accept' or '#deny')", 28);
+	memcpy(body.s+13, inviter->uri.s , inviter->uri.len );
+	memcpy(body.s+13 + inviter->uri.len, "(Type: '#accept' or '#deny')", 28);
 	body.s[body.len] = '\0';			
 
 	LM_DBG("to=[%.*s]\nfrom=[%.*s]\nbody=[%.*s]\n", 
